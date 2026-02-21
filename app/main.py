@@ -305,23 +305,23 @@ if page == "Metas Comerciais":
     with tabs[0]:
         st.write("Resumo executivo das metas por UF, vendedor e periodo.")
         colf1, colf2, colf3, colf4, colf5 = st.columns(5)
-        periodo_tipo = colf1.selectbox("Periodo", ["MONTH", "QUARTER"])
-        uf = colf2.text_input("UF (opcional)")
+        periodo_tipo = colf1.selectbox("Periodo", ["MONTH", "QUARTER"], key="metas_periodo_tipo")
+        uf = colf2.text_input("UF (opcional)", key="metas_uf")
         # dynamic vendedor list
         all_metas = list_metas({"ano": year})
         vend_opts = [""] + sorted(all_metas["vendedor_id"].dropna().unique().tolist()) if not all_metas.empty else [""]
-        vend = colf3.selectbox("Vendedor ID (opcional)", options=vend_opts)
-        status = colf4.multiselect("Status", ["ATIVO","PAUSADO","DESLIGADO","TRANSFERIDO"])
-        if colf5.button("Criar dados demo"):
+        vend = colf3.selectbox("Vendedor ID (opcional)", options=vend_opts, key="metas_vendedor")
+        status = colf4.multiselect("Status", ["ATIVO","PAUSADO","DESLIGADO","TRANSFERIDO"], key="metas_status")
+        if colf5.button("Criar dados demo", key="metas_seed"):
             seed_demo()
             st.success("Dados demo criados.")
 
         # periodo filter
         if periodo_tipo == "MONTH":
-            mes = st.selectbox("Mes", [""] + list(range(1, 13)))
+            mes = st.selectbox("Mes", [""] + list(range(1, 13)), key="metas_mes")
             quarter = None
         else:
-            quarter = st.selectbox("Quarter", [""] + [1, 2, 3, 4])
+            quarter = st.selectbox("Quarter", [""] + [1, 2, 3, 4], key="metas_quarter")
             mes = None
 
         filtros = {
