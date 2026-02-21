@@ -15,6 +15,7 @@ from src.data import load_sheets, load_bling_realizado
 from src.metrics import compute_kpis, vendedor_performance_period, meta_realizado_mensal, sparkline_last_months, period_label
 from src.viz import fmt_brl_abbrev, fmt_brl, fmt_pct, bar_meta_realizado, bar_meta_realizado_single, sparkline
 from src.metas_db import init_db, list_metas, create_meta, update_meta, pause_metas, summary_targets, transfer_assets, transfer_metas_futuras, seed_demo
+from src.telegram import build_alerts_message, send_telegram_message, telegram_enabled
 
 APP_TITLE = "McKinsey Agro CRM"
 DEFAULT_YEAR = 2026
@@ -297,6 +298,19 @@ if page == "Insights & Alertas":
     for title, val in alerts:
         st.metric(title, val)
 
+    st.divider()
+    st.caption("Telegram (opcional): configure TELEGRAM_BOT_TOKEN e TELEGRAM_CHAT_ID para enviar alertas.")
+    if st.button("Enviar alertas para Telegram", key="send_telegram_alerts"):
+        if not telegram_enabled():
+            st.error("Telegram nao configurado. Defina TELEGRAM_BOT_TOKEN e TELEGRAM_CHAT_ID no ambiente.")
+        else:
+            msg = build_alerts_message(APP_TITLE + " - Insights", period, alerts)
+            ok, detail = send_telegram_message(msg)
+            if ok:
+                st.success(detail)
+            else:
+                st.error(detail)
+
 # Page E - Metas Comerciais
 if page == "Metas Comerciais":
     st.subheader("Metas Comerciais")
@@ -346,7 +360,10 @@ if page == "Metas Comerciais":
         if not res["series"].empty:
             ser = res["series"].rename(columns={"meta_valor":"meta","realizado_valor":"receita"}).copy()
             if periodo_tipo == "QUARTER":
-                ser["periodo"] = ser["quarter"]
+                if "quarter" in ser.columns:
+                    ser["periodo"] = ser["quarter"]
+                else:
+                    ser["periodo"] = ser["mes"].apply(lambda m: ((int(m) - 1) // 3 + 1) if pd.notna(m) else None)
             else:
                 ser["periodo"] = ser["mes"]
             line = alt.Chart(ser).transform_fold(
