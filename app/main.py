@@ -17,7 +17,7 @@ from src.viz import fmt_brl_abbrev, fmt_brl, fmt_pct, bar_meta_realizado, bar_me
 from src.metas_db import init_db, list_metas, create_meta, update_meta, pause_metas, summary_targets, transfer_assets, transfer_metas_futuras, seed_demo
 from src.telegram import build_alerts_message, send_telegram_message, telegram_enabled
 
-APP_TITLE = "McKinsey Agro CRM"
+APP_TITLE = "Clear Agro CRM"
 DEFAULT_YEAR = 2026
 
 st.set_page_config(page_title=APP_TITLE, layout="wide")
