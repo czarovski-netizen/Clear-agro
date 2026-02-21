@@ -381,7 +381,7 @@ if page == "Metas Comerciais":
 
     with tabs[2]:
         st.write("Cadastrar nova meta")
-        step = st.radio("Etapa", ["Periodo", "Segmentacao", "Valores", "Revisao"], horizontal=True)
+        step = st.radio("Etapa", ["Periodo", "Segmentacao", "Valores", "Revisao"], horizontal=True, key="meta_step")
 
         if "meta_form" not in st.session_state:
             st.session_state["meta_form"] = {}
@@ -389,20 +389,20 @@ if page == "Metas Comerciais":
         mf = st.session_state["meta_form"]
 
         if step == "Periodo":
-            mf["periodo_tipo"] = st.selectbox("Periodo", ["MONTH", "QUARTER"], index=0)
-            mf["mes"] = st.selectbox("Mes", list(range(1, 13))) if mf["periodo_tipo"] == "MONTH" else None
-            mf["quarter"] = st.selectbox("Quarter", [1,2,3,4]) if mf["periodo_tipo"] == "QUARTER" else None
+            mf["periodo_tipo"] = st.selectbox("Periodo", ["MONTH", "QUARTER"], index=0, key="meta_periodo_tipo")
+            mf["mes"] = st.selectbox("Mes", list(range(1, 13)), key="meta_mes") if mf["periodo_tipo"] == "MONTH" else None
+            mf["quarter"] = st.selectbox("Quarter", [1,2,3,4], key="meta_quarter") if mf["periodo_tipo"] == "QUARTER" else None
 
         if step == "Segmentacao":
-            mf["estado"] = st.text_input("UF (ex: PR, RS)")
-            mf["vendedor_id"] = st.text_input("Vendedor ID")
-            mf["canal"] = st.text_input("Canal (opcional)")
-            mf["cultura"] = st.text_input("Cultura (opcional)")
+            mf["estado"] = st.text_input("UF (ex: PR, RS)", key="meta_uf")
+            mf["vendedor_id"] = st.text_input("Vendedor ID", key="meta_vendedor")
+            mf["canal"] = st.text_input("Canal (opcional)", key="meta_canal")
+            mf["cultura"] = st.text_input("Cultura (opcional)", key="meta_cultura")
 
         if step == "Valores":
-            mf["meta_valor"] = st.number_input("Meta (R$)", min_value=0.0, step=1000.0)
-            mf["meta_volume"] = st.number_input("Meta Volume (opcional)", min_value=0.0, step=1.0)
-            mf["status"] = st.selectbox("Status", ["ATIVO","PAUSADO","DESLIGADO","TRANSFERIDO"])
+            mf["meta_valor"] = st.number_input("Meta (R$)", min_value=0.0, step=1000.0, key="meta_valor")
+            mf["meta_volume"] = st.number_input("Meta Volume (opcional)", min_value=0.0, step=1.0, key="meta_volume")
+            mf["status"] = st.selectbox("Status", ["ATIVO","PAUSADO","DESLIGADO","TRANSFERIDO"], key="meta_status")
 
         if step == "Revisao":
             st.write("Revise os dados antes de salvar.")
