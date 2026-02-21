@@ -40,7 +40,9 @@ def style_table(df: pd.DataFrame, numeric_cols=None):
     styler = styler.apply(lambda x: ["background-color: #f7f8fa" if i % 2 else "" for i in range(len(x))], axis=0)
     styler = styler.set_properties(**{"text-align": "left"})
     if numeric_cols:
-        styler = styler.set_properties(subset=numeric_cols, **{"text-align": "right"})
+        cols = [c for c in numeric_cols if c in df.columns]
+        if cols:
+            styler = styler.set_properties(subset=cols, **{"text-align": "right"})
     return styler
 
 if st.sidebar.button("Recarregar base"):
@@ -221,7 +223,7 @@ if page == "Pipeline Manager":
         cols = ["cliente", "oportunidade", "etapa", "valor", "prob", "proximo_passo", "alerta", "score", "vendedor"]
         view = df[[c for c in cols if c in df.columns]].copy()
         st.dataframe(
-            style_table(view, numeric_cols=["valor", "prob", "score"]),
+            view,
             height=420,
         )
 
@@ -246,7 +248,7 @@ if page == "Performance & Ritmo":
         perf_disp = perf_disp[["vendedor", "meta", "receita", "atingimento_pct", "gap", "rank"]]
         topn = st.slider("Top N", min_value=5, max_value=30, value=15)
         st.dataframe(
-            style_table(perf_disp.head(topn), numeric_cols=["meta", "receita", "atingimento_pct", "gap", "rank"]),
+            perf_disp.head(topn),
             height=420,
             column_config={
                 "vendedor": st.column_config.TextColumn(width="large"),
