@@ -133,11 +133,29 @@ if page == "Executive Cockpit":
     st.subheader("Executive Cockpit")
     kpis = compute_kpis(sheets, year, month_map[month_label], ytd)
 
+    # fallback meta from metas.db when base_unificada meta is missing
+    meta_display = kpis.meta
+    if meta_display == 0:
+        mf = {"ano": year, "periodo_tipo": "MONTH"}
+        if sel_vendor != "TODOS":
+            mf["vendedor_id"] = sel_vendor
+        dfm = list_metas(mf)
+        if not dfm.empty:
+            if month_map[month_label] is not None and not ytd:
+                dfm = dfm[dfm["mes"] == month_map[month_label]]
+            elif ytd:
+                cur_m = pd.Timestamp.today().month
+                dfm = dfm[dfm["mes"] <= cur_m]
+            meta_display = float(pd.to_numeric(dfm["meta_valor"], errors="coerce").fillna(0).sum())
+
+    gap_display = meta_display - kpis.realizado
+    ating_display = (kpis.realizado / meta_display * 100) if meta_display else 0.0
+
     c1, c2, c3, c4, c5, c6 = st.columns(6)
     c1.metric("Realizado", fmt_brl_abbrev(kpis.realizado))
-    c2.metric("Meta", fmt_brl_abbrev(kpis.meta))
-    c3.metric("Atingimento %", fmt_pct(kpis.atingimento_pct))
-    c4.metric("Gap (R$)", fmt_brl_abbrev(kpis.gap))
+    c2.metric("Meta", fmt_brl_abbrev(meta_display))
+    c3.metric("Atingimento %", fmt_pct(ating_display))
+    c4.metric("Gap (R$)", fmt_brl_abbrev(gap_display))
     c5.metric("Pipeline Ponderado", fmt_brl_abbrev(kpis.pipeline_ponderado) if kpis.pipeline_ponderado is not None else "-")
     c6.metric("% c/ Proximo Passo", fmt_pct(kpis.pct_proximo_passo) if kpis.pct_proximo_passo is not None else "-")
 
