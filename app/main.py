@@ -329,8 +329,13 @@ if page == "Metas Comerciais":
         c4.metric("Delta", fmt_brl_abbrev(k.get("delta", 0)))
 
         if not res["series"].empty:
-            ser = res["series"].rename(columns={"meta_valor":"meta","realizado_valor":"receita","quarter":"mes"}).copy()
-            ser["periodo"] = ser["mes"].fillna(ser.get("quarter"))
+            ser = res["series"].rename(columns={"meta_valor":"meta","realizado_valor":"receita"}).copy()
+            if "mes" in ser.columns:
+                ser["periodo"] = ser["mes"]
+            elif "quarter" in ser.columns:
+                ser["periodo"] = ser["quarter"]
+            else:
+                ser["periodo"] = ser.index.astype(str)
             line = alt.Chart(ser).transform_fold(
                 ["meta","receita"], as_=["tipo","valor"]
             ).mark_line(point=True).encode(
