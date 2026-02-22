@@ -1,0 +1,12 @@
+{
+  "gestor": {
+    "title": "Clear Agro CRM - Gestor",
+    "allow_vendedores": [],
+    "block_vendedores": [],
+    "block_canais": ["B2B", "INDUSTRIA", "INDÚSTRIA", "INDUSTRIAIS", "CLEARCOAT"],
+    "block_clientes": ["PONTO RURAL", "TERRA VITHA"]
+  },
+  "director": {
+    "title": "Clear Agro CRM"
+  }
+}

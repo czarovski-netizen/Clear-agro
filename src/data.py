@@ -1,18 +1,26 @@
 from __future__ import annotations
 
 from pathlib import Path
+import os
 from typing import Dict
 
 import pandas as pd
 import streamlit as st
 
 ROOT = Path(__file__).resolve().parents[1]
-BASE = ROOT / "out" / "base_unificada.xlsx"
+_PROFILE = os.getenv("CRM_PROFILE", "director").strip().lower()
+if _PROFILE == "gestor" and (ROOT / "out" / "base_unificada_gestor.xlsx").exists():
+    BASE = ROOT / "out" / "base_unificada_gestor.xlsx"
+else:
+    BASE = ROOT / "out" / "base_unificada.xlsx"
 BLING_VENDAS = ROOT / "bling_api" / "vendas_2026_cache.jsonl"
 BLING_VENDAS_FALLBACK = ROOT / "bling_api" / "vendas_2025_cache.jsonl"
 BLING_VENDEDORES = ROOT / "bling_api" / "vendedores_map.csv"
 BLING_NFE_2026 = ROOT / "bling_api" / "nfe_2026_cache.jsonl"
 BLING_NFE_2025 = ROOT / "bling_api" / "nfe_2025_cache.jsonl"
+BLING_CONTAS_RECEBER = ROOT / "bling_api" / "contas_receber_cache.jsonl"
+BLING_CONTAS_PAGAR = ROOT / "bling_api" / "contas_pagar_cache.jsonl"
+BLING_ESTOQUE = ROOT / "bling_api" / "estoque_cache.jsonl"
 
 
 def _norm(col: str) -> str:
@@ -123,6 +131,72 @@ def load_bling_nfe(year: int) -> pd.DataFrame:
     elif "valor" in df.columns:
         df["valor"] = pd.to_numeric(df["valor"], errors="coerce")
     return df[["data", "valor"]].dropna()
+
+
+def _load_jsonl(cache: Path) -> pd.DataFrame:
+    if not cache.exists():
+        return pd.DataFrame()
+    rows = []
+    import json
+    with cache.open("r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rows.append(json.loads(line))
+            except Exception:
+                continue
+    if not rows:
+        return pd.DataFrame()
+    return pd.json_normalize(rows)
+
+
+def _pick_first_column(df: pd.DataFrame, options: list[str]) -> str | None:
+    for c in options:
+        if c in df.columns:
+            return c
+    return None
+
+
+@st.cache_data(show_spinner=False)
+def load_bling_contas(tipo: str = "receber") -> pd.DataFrame:
+    cache = BLING_CONTAS_RECEBER if tipo == "receber" else BLING_CONTAS_PAGAR
+    df = _load_jsonl(cache)
+    if df.empty:
+        return df
+
+    val_col = _pick_first_column(df, ["valor", "valorDocumento", "valorOriginal", "total", "titulo.valor"])
+    venc_col = _pick_first_column(df, ["dataVencimento", "vencimento", "dataEmissao", "competencia"])
+    sit_col = _pick_first_column(df, ["situacao.descricao", "situacao.valor", "situacao", "status"])
+    contato_col = _pick_first_column(df, ["contato.nome", "contato", "fornecedor.nome", "cliente.nome"])
+
+    out = pd.DataFrame()
+    out["id"] = df["id"] if "id" in df.columns else range(1, len(df) + 1)
+    out["tipo"] = tipo
+    out["valor"] = pd.to_numeric(df[val_col], errors="coerce") if val_col else 0.0
+    out["vencimento"] = pd.to_datetime(df[venc_col], errors="coerce") if venc_col else pd.NaT
+    out["situacao"] = df[sit_col].astype(str) if sit_col else "N/D"
+    out["contato"] = df[contato_col].astype(str) if contato_col else "N/D"
+    return out
+
+
+@st.cache_data(show_spinner=False)
+def load_bling_estoque() -> pd.DataFrame:
+    df = _load_jsonl(BLING_ESTOQUE)
+    if df.empty:
+        return df
+
+    produto_col = _pick_first_column(df, ["produto.nome", "nome", "descricao", "produto.descricao"])
+    qtd_col = _pick_first_column(df, ["saldoFisicoTotal", "saldoVirtualTotal", "saldo", "estoque", "quantidade"])
+    cod_col = _pick_first_column(df, ["produto.codigo", "codigo", "sku"])
+
+    out = pd.DataFrame()
+    out["id"] = df["id"] if "id" in df.columns else range(1, len(df) + 1)
+    out["produto"] = df[produto_col].astype(str) if produto_col else "N/D"
+    out["codigo"] = df[cod_col].astype(str) if cod_col else ""
+    out["saldo"] = pd.to_numeric(df[qtd_col], errors="coerce").fillna(0) if qtd_col else 0
+    return out
 
 
 @st.cache_data(show_spinner=False)
