@@ -4,6 +4,9 @@ services:
     runtime: python
     plan: free
     region: oregon
+    envVars:
+      - key: CRM_PUBLIC_REVIEW
+        value: "1"
     buildCommand: pip install -r requirements.txt
     startCommand: streamlit run app/main.py --server.address 0.0.0.0 --server.port $PORT --server.headless true
     autoDeploy: true

@@ -1,5 +1,6 @@
 import os
 import json
+import unicodedata
 import streamlit as st
 import pandas as pd
 import altair as alt
@@ -20,6 +21,7 @@ from src.metas_db import init_db, list_metas, create_meta, update_meta, pause_me
 from src.telegram import build_alerts_message, send_telegram_message, telegram_enabled
 
 PROFILE = os.getenv("CRM_PROFILE", "director").strip().lower()
+PUBLIC_REVIEW = os.getenv("CRM_PUBLIC_REVIEW", "").strip().lower() in {"1", "true", "yes", "on"}
 APP_TITLE = "Clear Agro CRM"
 ACL_PATH = ROOT / "data" / "access_control.json"
 DEFAULT_YEAR = 2026
@@ -77,6 +79,14 @@ def load_acl() -> dict:
 
 def _clean_list(values):
     return [v for v in values if v not in (None, "", "TODOS")]
+
+
+def _vendor_key(value: object) -> str:
+    txt = str(value or "").strip().upper()
+    if not txt:
+        return ""
+    txt = "".join(ch for ch in unicodedata.normalize("NFKD", txt) if not unicodedata.combining(ch))
+    return " ".join(txt.split())
 
 
 def apply_acl(df: pd.DataFrame, vendor_col: str = "vendedor") -> pd.DataFrame:
@@ -156,24 +166,10 @@ for m, label in zip(months, month_labels[1:]):
 
 month_label = st.sidebar.selectbox("Mes", options=month_labels, index=0)
 ytd = st.sidebar.checkbox("Ver YTD", value=True)
-
-vendors = ["TODOS"]
-if "metas" in sheets and not sheets["metas"].empty and "vendedor" in sheets["metas"].columns:
-    vendors += sorted(sheets["metas"]["vendedor"].dropna().unique().tolist())
-sel_vendor = st.sidebar.selectbox("Vendedor", options=vendors, index=0)
-
-page = st.sidebar.selectbox(
-    "Pagina",
-    options=[
-        "Executive Cockpit",
-        "Finance Control Tower",
-        "Pipeline Manager",
-        "Performance & Ritmo",
-        "Insights & Alertas",
-        "Metas Comerciais",
-        "Auditoria",
-    ],
-)
+selected_month = month_map[month_label]
+effective_ytd = ytd and selected_month is None
+if ytd and selected_month is not None:
+    st.sidebar.caption("YTD desativado porque um mes especifico foi selecionado.")
 
 use_bling = st.sidebar.checkbox("Usar realizado do Bling", value=False)
 if use_bling:
@@ -183,26 +179,57 @@ if use_bling:
     else:
         st.sidebar.info("Bling: cache nao encontrado. Usando realizado local.")
 
+vendors = ["TODOS"]
+if "metas" in sheets and not sheets["metas"].empty and "vendedor" in sheets["metas"].columns:
+    vendors += sorted(sheets["metas"]["vendedor"].dropna().unique().tolist())
+if "realizado" in sheets and not sheets["realizado"].empty and "vendedor" in sheets["realizado"].columns:
+    vendors += sorted(sheets["realizado"]["vendedor"].dropna().unique().tolist())
+vendors = ["TODOS"] + sorted(set(v for v in vendors if v != "TODOS"))
+sel_vendor = st.sidebar.selectbox("Vendedor", options=vendors, index=0)
+
+page_options = [
+    "Executive Cockpit",
+    "Finance Control Tower",
+    "Pipeline Manager",
+    "Performance & Ritmo",
+    "Insights & Alertas",
+    "Metas Comerciais",
+    "Auditoria",
+]
+if PUBLIC_REVIEW:
+    page_options = [p for p in page_options if p != "Metas Comerciais"]
+
+page = st.sidebar.selectbox("Pagina", options=page_options)
+
 if PROFILE == "gestor":
     acl = load_acl().get("gestor", {})
     title = acl.get("title") or "Clear Agro CRM - Gestor"
 else:
     title = APP_TITLE
 st.title(title)
-period = period_label(year, month_map[month_label], ytd)
+if PUBLIC_REVIEW:
+    st.info("Modo revisao publica ativo: acesso sem login e somente visualizacao.")
+period = period_label(year, selected_month, effective_ytd)
 st.caption(f"Periodo: {period}")
+
+if PUBLIC_REVIEW and page == "Metas Comerciais":
+    st.warning("Pagina indisponivel no modo de revisao publica.")
+    st.stop()
 
 # Apply vendor filter to metas/realizado
 if sel_vendor != "TODOS":
+    sel_vendor_key = _vendor_key(sel_vendor)
     if "metas" in sheets and "vendedor" in sheets["metas"].columns:
-        sheets["metas"] = sheets["metas"][sheets["metas"]["vendedor"] == sel_vendor]
+        vm = sheets["metas"]["vendedor"].map(_vendor_key)
+        sheets["metas"] = sheets["metas"][vm == sel_vendor_key]
     if "realizado" in sheets and "vendedor" in sheets["realizado"].columns:
-        sheets["realizado"] = sheets["realizado"][sheets["realizado"]["vendedor"] == sel_vendor]
+        vr = sheets["realizado"]["vendedor"].map(_vendor_key)
+        sheets["realizado"] = sheets["realizado"][vr == sel_vendor_key]
 
 # Page A - Executive Cockpit
 if page == "Executive Cockpit":
     st.subheader("Executive Cockpit")
-    kpis = compute_kpis(sheets, year, month_map[month_label], ytd)
+    kpis = compute_kpis(sheets, year, selected_month, effective_ytd)
 
     # fallback meta from metas.db when base_unificada meta is missing
     meta_display = kpis.meta
@@ -221,8 +248,8 @@ if page == "Executive Cockpit":
                 dfm_all = dfm_all[~dfm_all["vendedor_id"].isin(block)]
         if not dfm_all.empty:
             dfm = dfm_all.copy()
-            if month_map[month_label] is not None and not ytd:
-                dfm = dfm[dfm["mes"] == month_map[month_label]]
+            if selected_month is not None and not effective_ytd:
+                dfm = dfm[dfm["mes"] == selected_month]
                 meta_display = float(pd.to_numeric(dfm["meta_valor"], errors="coerce").fillna(0).sum())
             else:
                 # quando "TODOS", usar meta anual completa
@@ -242,10 +269,10 @@ if page == "Executive Cockpit":
     series = meta_realizado_mensal(sheets, year)
     if not series.empty:
         st.subheader("Meta vs Realizado")
-        if month_map[month_label] is None or ytd:
+        if selected_month is None or effective_ytd:
             st.altair_chart(bar_meta_realizado(series), width="stretch")
         else:
-            single = series[series["data"].dt.month == month_map[month_label]].copy()
+            single = series[series["data"].dt.month == selected_month].copy()
             if not single.empty:
                 st.altair_chart(bar_meta_realizado_single(single), width="stretch")
                 last6 = sparkline_last_months(series, 6)
@@ -266,7 +293,7 @@ if page == "Executive Cockpit":
     # So what
     st.subheader("So what?")
     bullets = []
-    perf = vendedor_performance_period(sheets, year, month_map[month_label], ytd)
+    perf = vendedor_performance_period(sheets, year, selected_month, effective_ytd)
     if not perf.empty:
         perf = perf.sort_values("gap", ascending=False)
         top_gap = perf.head(3)
@@ -283,9 +310,9 @@ if page == "Executive Cockpit":
             bullets.append(f"Concentracao top 5: {share:.0f}% do realizado")
 
     # Mes em risco
-    if month_map[month_label] is not None and not ytd:
+    if selected_month is not None and not effective_ytd:
         today = pd.Timestamp.today()
-        if today.year == year and today.month == month_map[month_label]:
+        if today.year == year and today.month == selected_month:
             esperado = (today.day / today.days_in_month) * kpis.meta
             if kpis.meta > 0 and kpis.realizado < esperado * 0.8:
                 bullets.append("Mes em risco: realizado abaixo do esperado")
@@ -352,7 +379,7 @@ if page == "Pipeline Manager":
 # Page C - Performance & Ritmo
 if page == "Performance & Ritmo":
     st.subheader("Performance & Ritmo")
-    perf = vendedor_performance_period(sheets, year, month_map[month_label], ytd)
+    perf = vendedor_performance_period(sheets, year, selected_month, effective_ytd)
     if perf.empty:
         st.info("Pendencia: metas/realizado por vendedor nao disponivel")
     else:
@@ -596,17 +623,20 @@ if page == "Auditoria":
         st.dataframe(est.sort_values("saldo", ascending=False).head(50), height=340)
 
     st.divider()
-    st.caption("Telegram (opcional): configure TELEGRAM_BOT_TOKEN e TELEGRAM_CHAT_ID para enviar alertas.")
-    if st.button("Enviar alertas para Telegram", key="send_telegram_alerts"):
-        if not telegram_enabled():
-            st.error("Telegram nao configurado. Defina TELEGRAM_BOT_TOKEN e TELEGRAM_CHAT_ID no ambiente.")
-        else:
-            msg = build_alerts_message(APP_TITLE + " - Auditoria", period, audit_alerts)
-            ok, detail = send_telegram_message(msg)
-            if ok:
-                st.success(detail)
+    if PUBLIC_REVIEW:
+        st.caption("Modo revisao publica: envio de alertas desativado (somente visualizacao).")
+    else:
+        st.caption("Telegram (opcional): configure TELEGRAM_BOT_TOKEN e TELEGRAM_CHAT_ID para enviar alertas.")
+        if st.button("Enviar alertas para Telegram", key="send_telegram_alerts"):
+            if not telegram_enabled():
+                st.error("Telegram nao configurado. Defina TELEGRAM_BOT_TOKEN e TELEGRAM_CHAT_ID no ambiente.")
             else:
-                st.error(detail)
+                msg = build_alerts_message(APP_TITLE + " - Auditoria", period, audit_alerts)
+                ok, detail = send_telegram_message(msg)
+                if ok:
+                    st.success(detail)
+                else:
+                    st.error(detail)
 
 # Page E - Metas Comerciais
 if page == "Metas Comerciais":
