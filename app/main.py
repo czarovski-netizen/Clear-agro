@@ -183,12 +183,51 @@ if use_bling:
     if not br.empty:
         sheets["realizado"] = br
 
-vendors = ["TODOS"]
-if "metas" in sheets and not sheets["metas"].empty and "vendedor" in sheets["metas"].columns:
-    vendors += sorted(sheets["metas"]["vendedor"].dropna().unique().tolist())
-if "realizado" in sheets and not sheets["realizado"].empty and "vendedor" in sheets["realizado"].columns:
-    vendors += sorted(sheets["realizado"]["vendedor"].dropna().unique().tolist())
-vendors = ["TODOS"] + sorted(set(v for v in vendors if v != "TODOS"))
+show_inactive_vendors = st.sidebar.checkbox("Mostrar inativos/historico", value=False)
+
+# Build vendor list focused on selected period; keep optional historical expansion.
+vendor_scores: dict[str, float] = {}
+all_vendors_set: set[str] = set()
+today = pd.Timestamp.today()
+
+for sheet_name, value_col in [("metas", "meta"), ("realizado", "receita")]:
+    dfv = sheets.get(sheet_name, pd.DataFrame())
+    if dfv.empty or "vendedor" not in dfv.columns:
+        continue
+    dfv = dfv.copy()
+    all_vendors_set.update([str(v).strip() for v in dfv["vendedor"].dropna().tolist() if str(v).strip()])
+    if "data" in dfv.columns:
+        mask = dfv["data"].dt.year == year
+        if effective_ytd:
+            mask &= dfv["data"].dt.month <= today.month
+        elif selected_month is not None:
+            mask &= dfv["data"].dt.month == selected_month
+        dfv = dfv[mask]
+    if dfv.empty:
+        continue
+    if value_col in dfv.columns:
+        dfv[value_col] = pd.to_numeric(dfv[value_col], errors="coerce").fillna(0)
+        grouped = dfv.groupby("vendedor")[value_col].sum()
+    else:
+        grouped = dfv.groupby("vendedor").size().astype(float)
+    for vend, val in grouped.items():
+        vend_txt = str(vend).strip()
+        if vend_txt:
+            vendor_scores[vend_txt] = vendor_scores.get(vend_txt, 0.0) + float(val)
+
+active_ranked = sorted(
+    [v for v, score in vendor_scores.items() if score > 0],
+    key=lambda v: (-vendor_scores[v], v),
+)
+inactive_ranked = sorted([v for v in all_vendors_set if v not in set(active_ranked)])
+
+if show_inactive_vendors:
+    vendors = ["TODOS"] + active_ranked + inactive_ranked
+else:
+    vendors = ["TODOS"] + active_ranked
+    if len(vendors) == 1:
+        vendors = ["TODOS"] + sorted(all_vendors_set)
+
 sel_vendor = st.sidebar.selectbox("Vendedor", options=vendors, index=0)
 
 page_options = [
