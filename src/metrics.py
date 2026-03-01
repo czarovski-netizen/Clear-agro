@@ -84,22 +84,35 @@ def vendedor_performance_period(sheets: Dict[str, pd.DataFrame], year: int, mont
     metas = sheets.get("metas", pd.DataFrame())
     real = sheets.get("realizado", pd.DataFrame())
 
-    if metas.empty or "vendedor" not in metas.columns:
-        return pd.DataFrame()
-
-    metas = metas.copy()
-    metas_mask = _period_mask(metas, year, month, ytd)
-    metas = metas[metas_mask]
-    metas_sum = metas.groupby("vendedor")["meta"].sum().reset_index()
+    metas_sum = pd.DataFrame(columns=["vendedor", "meta"])
+    if not metas.empty and "vendedor" in metas.columns:
+        metas = metas.copy()
+        if "data" in metas.columns:
+            metas["data"] = pd.to_datetime(metas["data"], errors="coerce")
+            metas = metas[_period_mask(metas, year, month, ytd)]
+        if "meta" not in metas.columns:
+            metas["meta"] = 0.0
+        metas["meta"] = pd.to_numeric(metas["meta"], errors="coerce").fillna(0)
+        metas_sum = metas.groupby("vendedor", dropna=False)["meta"].sum().reset_index()
 
     real_sum = pd.DataFrame(columns=["vendedor", "receita"])
     if not real.empty and "vendedor" in real.columns:
-        real_mask = _period_mask(real, year, month, ytd)
-        real = real[real_mask]
-        real_sum = real.groupby("vendedor")["receita"].sum().reset_index()
+        real = real.copy()
+        if "data" in real.columns:
+            real["data"] = pd.to_datetime(real["data"], errors="coerce")
+            real = real[_period_mask(real, year, month, ytd)]
+        if "receita" not in real.columns:
+            real["receita"] = 0.0
+        real["receita"] = pd.to_numeric(real["receita"], errors="coerce").fillna(0)
+        real_sum = real.groupby("vendedor", dropna=False)["receita"].sum().reset_index()
 
-    df = metas_sum.merge(real_sum, on="vendedor", how="left")
-    df["receita"] = df["receita"].fillna(0)
+    if metas_sum.empty and real_sum.empty:
+        return pd.DataFrame()
+
+    df = metas_sum.merge(real_sum, on="vendedor", how="outer")
+    df["meta"] = pd.to_numeric(df.get("meta", 0), errors="coerce").fillna(0)
+    df["receita"] = pd.to_numeric(df.get("receita", 0), errors="coerce").fillna(0)
+    df["vendedor"] = df["vendedor"].astype(str).fillna("").replace({"": "SEM_VENDEDOR"})
     df["atingimento_pct"] = df.apply(lambda r: (r["receita"] / r["meta"] * 100) if r["meta"] else 0.0, axis=1)
     df["gap"] = df["meta"] - df["receita"]
     return df
