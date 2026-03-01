@@ -182,7 +182,8 @@ if use_bling:
     if not br.empty:
         sheets["realizado"] = br
     else:
-        st.sidebar.info("Bling: cache nao encontrado. Usando realizado local.")
+        if not PUBLIC_REVIEW:
+            st.sidebar.info("Bling: cache nao encontrado. Usando realizado local.")
 
 vendors = ["TODOS"]
 if "metas" in sheets and not sheets["metas"].empty and "vendedor" in sheets["metas"].columns:
