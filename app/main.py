@@ -128,8 +128,13 @@ if st.sidebar.button("Recarregar base"):
         pass
 sheets = load_sheets()
 if not sheets:
-    st.warning("Base nao encontrada em ./out/base_unificada.xlsx")
-    st.stop()
+    st.warning("Base principal nao encontrada. Carregando modo revisao com dados vazios.")
+    sheets = {
+        "metas": pd.DataFrame(columns=["data", "vendedor", "meta"]),
+        "realizado": pd.DataFrame(columns=["data", "vendedor", "receita"]),
+        "oportunidades": pd.DataFrame(columns=["cliente", "vendedor", "volume_potencial", "probabilidade", "data_proximo_passo"]),
+        "atividades": pd.DataFrame(columns=["data"]),
+    }
 
 # Apply ACL on loaded sheets (gestor profile)
 for key in ["metas", "realizado", "oportunidades"]:
@@ -552,6 +557,10 @@ if page == "Auditoria":
 
     # Planilha (realizado)
     real = sheets.get("realizado", pd.DataFrame()).copy()
+    if "data" not in real.columns:
+        real["data"] = pd.NaT
+    if "receita" not in real.columns:
+        real["receita"] = 0.0
     if "data" in real.columns:
         real["data"] = pd.to_datetime(real["data"], errors="coerce")
     if "receita" in real.columns:
