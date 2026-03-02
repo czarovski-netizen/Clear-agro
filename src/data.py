@@ -19,6 +19,7 @@ BLING_VENDAS_FALLBACK = ROOT / "bling_api" / "vendas_2025_cache.jsonl"
 BLING_VENDAS_CR = ROOT / "bling_api" / "vendas_2026_cache_cr.jsonl"
 BLING_VENDAS_CR_FALLBACK = ROOT / "bling_api" / "vendas_2025_cache_cr.jsonl"
 BLING_VENDEDORES = ROOT / "bling_api" / "vendedores_map.csv"
+BLING_VENDEDORES_CR = ROOT / "bling_api" / "vendedores_map_cr.csv"
 BLING_NFE_2026 = ROOT / "bling_api" / "nfe_2026_cache.jsonl"
 BLING_NFE_2025 = ROOT / "bling_api" / "nfe_2025_cache.jsonl"
 BLING_NFE_2026_CR = ROOT / "bling_api" / "nfe_2026_cache_cr.jsonl"
@@ -127,10 +128,18 @@ def load_bling_realizado() -> pd.DataFrame:
                 break
     df["origem"] = "bling"
 
-    if BLING_VENDEDORES.exists() and "vendedor_id" in df.columns:
+    if "vendedor_id" in df.columns:
         try:
-            vmap = pd.read_csv(BLING_VENDEDORES, encoding="utf-8-sig")
-            vmap.columns = [_norm(c) for c in vmap.columns]
+            vmap_frames = []
+            for map_path in [BLING_VENDEDORES, BLING_VENDEDORES_CR]:
+                if not map_path.exists():
+                    continue
+                vm = pd.read_csv(map_path, encoding="utf-8-sig")
+                vm.columns = [_norm(c) for c in vm.columns]
+                vmap_frames.append(vm)
+            if not vmap_frames:
+                raise RuntimeError("no vendor map files found")
+            vmap = pd.concat(vmap_frames, ignore_index=True)
             # Accept common header variants from manual CSV exports.
             if "vendedor_id" not in vmap.columns:
                 for alt in ["id", "vendedorid", "vendedor_id_bling"]:
