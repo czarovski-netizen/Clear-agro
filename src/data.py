@@ -16,9 +16,13 @@ else:
     BASE = ROOT / "out" / "base_unificada.xlsx"
 BLING_VENDAS = ROOT / "bling_api" / "vendas_2026_cache.jsonl"
 BLING_VENDAS_FALLBACK = ROOT / "bling_api" / "vendas_2025_cache.jsonl"
+BLING_VENDAS_CR = ROOT / "bling_api" / "vendas_2026_cache_cr.jsonl"
+BLING_VENDAS_CR_FALLBACK = ROOT / "bling_api" / "vendas_2025_cache_cr.jsonl"
 BLING_VENDEDORES = ROOT / "bling_api" / "vendedores_map.csv"
 BLING_NFE_2026 = ROOT / "bling_api" / "nfe_2026_cache.jsonl"
 BLING_NFE_2025 = ROOT / "bling_api" / "nfe_2025_cache.jsonl"
+BLING_NFE_2026_CR = ROOT / "bling_api" / "nfe_2026_cache_cr.jsonl"
+BLING_NFE_2025_CR = ROOT / "bling_api" / "nfe_2025_cache_cr.jsonl"
 BLING_CONTAS_RECEBER = ROOT / "bling_api" / "contas_receber_cache.jsonl"
 BLING_CONTAS_PAGAR = ROOT / "bling_api" / "contas_pagar_cache.jsonl"
 BLING_ESTOQUE = ROOT / "bling_api" / "estoque_cache.jsonl"
@@ -76,18 +80,31 @@ def _standardize_metas(df: pd.DataFrame) -> pd.DataFrame:
 
 @st.cache_data(show_spinner=False)
 def load_bling_realizado() -> pd.DataFrame:
-    cache = BLING_VENDAS if BLING_VENDAS.exists() else BLING_VENDAS_FALLBACK
-    if not cache.exists():
+    caches: list[Path] = []
+    if BLING_VENDAS.exists():
+        caches.append(BLING_VENDAS)
+    elif BLING_VENDAS_FALLBACK.exists():
+        caches.append(BLING_VENDAS_FALLBACK)
+    if BLING_VENDAS_CR.exists():
+        caches.append(BLING_VENDAS_CR)
+    elif BLING_VENDAS_CR_FALLBACK.exists():
+        caches.append(BLING_VENDAS_CR_FALLBACK)
+
+    if not caches:
         return pd.DataFrame()
     rows = []
     import json
-    with cache.open("r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            obj = pd.json_normalize(json.loads(line))
-            rows.append(obj)
+    for cache in caches:
+        with cache.open("r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                obj = pd.json_normalize(json.loads(line))
+                # If source file has no explicit company flag, infer from filename.
+                if "empresa" not in obj.columns:
+                    obj["empresa"] = "CR" if cache.name.endswith("_cr.jsonl") else "CZ"
+                rows.append(obj)
     if not rows:
         return pd.DataFrame()
     df = pd.concat(rows, ignore_index=True)
@@ -176,7 +193,7 @@ def load_bling_realizado() -> pd.DataFrame:
             pass
 
     df["vendedor"] = df["vendedor"].fillna("SEM_VENDEDOR")
-    keep_cols = [c for c in ["data", "receita", "cliente", "vendedor", "origem"] if c in df.columns]
+    keep_cols = [c for c in ["data", "receita", "cliente", "vendedor", "origem", "empresa"] if c in df.columns]
     df = df[keep_cols].copy()
     df = df.dropna(subset=["data", "receita"])
     return df
@@ -184,25 +201,30 @@ def load_bling_realizado() -> pd.DataFrame:
 
 @st.cache_data(show_spinner=False)
 def load_bling_nfe(year: int) -> pd.DataFrame:
-    if year == 2026 and BLING_NFE_2026.exists():
-        cache = BLING_NFE_2026
-    elif year == 2025 and BLING_NFE_2025.exists():
-        cache = BLING_NFE_2025
-    elif BLING_NFE_2026.exists():
-        cache = BLING_NFE_2026
-    elif BLING_NFE_2025.exists():
-        cache = BLING_NFE_2025
+    caches: list[Path] = []
+    if year == 2026:
+        candidates = [BLING_NFE_2026, BLING_NFE_2026_CR]
+    elif year == 2025:
+        candidates = [BLING_NFE_2025, BLING_NFE_2025_CR]
     else:
+        candidates = [BLING_NFE_2026, BLING_NFE_2026_CR, BLING_NFE_2025, BLING_NFE_2025_CR]
+    for path in candidates:
+        if path.exists():
+            caches.append(path)
+    if not caches:
         return pd.DataFrame()
     rows = []
     import json
-    with cache.open("r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            obj = json.loads(line)
-            rows.append(obj)
+    for cache in caches:
+        with cache.open("r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                obj = json.loads(line)
+                if "empresa" not in obj:
+                    obj["empresa"] = "CR" if cache.name.endswith("_cr.jsonl") else "CZ"
+                rows.append(obj)
     if not rows:
         return pd.DataFrame()
     df = pd.DataFrame(rows)
