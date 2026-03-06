@@ -20,6 +20,17 @@ bling_api/_write_test.tmp
 out/*
 out/ui_acceptance.md
 
+# Generated and local datasets
+data/raw/
+data/staging/
+data/marts/
+data/exports/
+data/quality/
+data/planilhas_individuais/
+
 # Local labs and heavy automation workspace
 playwright-e2e/
 aios-lab/
+
+# Temporary local scripts
+scripts/tmp_*.py
