@@ -1,4 +1,4 @@
-﻿# Worktree Snapshot - 2026-03-06
+# Worktree Snapshot - 2026-03-06
 
 Branch: `main`
 Objective: keep the repository auditable while preserving ongoing local work.
@@ -30,3 +30,4 @@ Objective: keep the repository auditable while preserving ongoing local work.
 2. `feat(integrations): bling/google/telegram automation`
 3. `docs(ops): operating manual and data dictionary`
 4. `chore(data): add only approved fixtures; keep caches local`
+
