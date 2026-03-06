@@ -46,3 +46,26 @@ def test_compute_kpis_ytd():
     kpis = compute_kpis(sheets, year=2026, month=None, ytd=True)
     assert kpis.realizado >= 100.0
     assert kpis.meta >= 500.0
+
+
+def test_compute_kpis_quarter():
+    sheets = {
+        "realizado": pd.DataFrame(
+            {
+                "data": pd.to_datetime(["2026-01-05", "2026-03-20", "2026-04-01"]),
+                "receita": [100.0, 250.0, 900.0],
+            }
+        ),
+        "metas": pd.DataFrame(
+            {
+                "data": pd.to_datetime(["2026-01-01", "2026-02-01", "2026-03-01", "2026-04-01"]),
+                "meta": [300.0, 300.0, 300.0, 999.0],
+            }
+        ),
+        "oportunidades": pd.DataFrame(),
+        "atividades": pd.DataFrame(),
+    }
+    kpis = compute_kpis(sheets, year=2026, month=None, ytd=False, quarter=1)
+    assert kpis.realizado == 350.0
+    assert kpis.meta == 900.0
+    assert kpis.gap == 550.0

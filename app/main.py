@@ -170,12 +170,20 @@ month_map = {"TODOS": None}
 for m, label in zip(months, month_labels[1:]):
     month_map[label] = m
 
-month_label = st.sidebar.selectbox("Mes", options=month_labels, index=0)
-ytd = st.sidebar.checkbox("Ver YTD", value=True)
-selected_month = month_map[month_label]
-effective_ytd = ytd and selected_month is None
-if ytd and selected_month is not None:
-    st.sidebar.caption("YTD desativado porque um mes especifico foi selecionado.")
+period_mode = st.sidebar.selectbox("Visao de periodo", options=["YTD", "Mes", "Quarter"], index=0)
+selected_month = None
+selected_quarter = None
+effective_ytd = False
+
+if period_mode == "Mes":
+    month_label = st.sidebar.selectbox("Mes", options=month_labels, index=1 if len(month_labels) > 1 else 0)
+    selected_month = month_map[month_label]
+    effective_ytd = selected_month is None
+elif period_mode == "Quarter":
+    current_q = ((pd.Timestamp.today().month - 1) // 3) + 1
+    selected_quarter = st.sidebar.selectbox("Quarter", options=[1, 2, 3, 4], index=current_q - 1)
+else:
+    effective_ytd = True
 
 use_bling = st.sidebar.checkbox("Usar realizado do Bling", value=PUBLIC_REVIEW)
 if use_bling:
@@ -198,7 +206,11 @@ for sheet_name, value_col in [("metas", "meta"), ("realizado", "receita")]:
     all_vendors_set.update([str(v).strip() for v in dfv["vendedor"].dropna().tolist() if str(v).strip()])
     if "data" in dfv.columns:
         mask = dfv["data"].dt.year == year
-        if effective_ytd:
+        if selected_quarter is not None:
+            q_start = (selected_quarter - 1) * 3 + 1
+            q_end = q_start + 2
+            mask &= dfv["data"].dt.month.between(q_start, q_end)
+        elif effective_ytd:
             mask &= dfv["data"].dt.month <= today.month
         elif selected_month is not None:
             mask &= dfv["data"].dt.month == selected_month
@@ -253,7 +265,7 @@ st.title(title)
 if PUBLIC_REVIEW:
     st.info("Modo revisao publica ativo: acesso sem login e somente visualizacao.")
     st.caption(f"Build: {APP_BUILD}")
-period = period_label(year, selected_month, effective_ytd)
+period = period_label(year, selected_month, effective_ytd, selected_quarter)
 st.caption(f"Periodo: {period}")
 
 if PUBLIC_REVIEW and page == "Metas Comerciais":
@@ -273,7 +285,7 @@ if sel_vendor != "TODOS":
 # Page A - Executive Cockpit
 if page == "Executive Cockpit":
     st.subheader("Executive Cockpit")
-    kpis = compute_kpis(sheets, year, selected_month, effective_ytd)
+    kpis = compute_kpis(sheets, year, selected_month, effective_ytd, selected_quarter)
 
     # fallback meta from metas.db when base_unificada meta is missing
     meta_display = kpis.meta
@@ -292,7 +304,16 @@ if page == "Executive Cockpit":
                 dfm_all = dfm_all[~dfm_all["vendedor_id"].isin(block)]
         if not dfm_all.empty:
             dfm = dfm_all.copy()
-            if selected_month is not None and not effective_ytd:
+            if selected_quarter is not None:
+                if "quarter" in dfm.columns:
+                    dfm = dfm[pd.to_numeric(dfm["quarter"], errors="coerce").fillna(0).astype(int) == int(selected_quarter)]
+                elif "mes" in dfm.columns:
+                    q_start = (selected_quarter - 1) * 3 + 1
+                    q_end = q_start + 2
+                    mes_num = pd.to_numeric(dfm["mes"], errors="coerce").fillna(0).astype(int)
+                    dfm = dfm[mes_num.between(q_start, q_end)]
+                meta_display = float(pd.to_numeric(dfm["meta_valor"], errors="coerce").fillna(0).sum())
+            elif selected_month is not None and not effective_ytd:
                 dfm = dfm[dfm["mes"] == selected_month]
                 meta_display = float(pd.to_numeric(dfm["meta_valor"], errors="coerce").fillna(0).sum())
             else:
@@ -337,7 +358,7 @@ if page == "Executive Cockpit":
     # So what
     st.subheader("So what?")
     bullets = []
-    perf = vendedor_performance_period(sheets, year, selected_month, effective_ytd)
+    perf = vendedor_performance_period(sheets, year, selected_month, effective_ytd, selected_quarter)
     if not perf.empty:
         perf = perf.sort_values("gap", ascending=False)
         top_gap = perf.head(3)
@@ -354,7 +375,7 @@ if page == "Executive Cockpit":
             bullets.append(f"Concentracao top 5: {share:.0f}% do realizado")
 
     # Mes em risco
-    if selected_month is not None and not effective_ytd:
+    if selected_month is not None and not effective_ytd and selected_quarter is None:
         today = pd.Timestamp.today()
         if today.year == year and today.month == selected_month:
             esperado = (today.day / today.days_in_month) * kpis.meta
@@ -423,7 +444,14 @@ if page == "Pipeline Manager":
 # Page C - Performance & Ritmo
 if page == "Performance & Ritmo":
     st.subheader("Performance & Ritmo")
-    perf = vendedor_performance_period(sheets, year, selected_month, effective_ytd)
+    perf_kpis = compute_kpis(sheets, year, selected_month, effective_ytd, selected_quarter)
+    quarter_suffix = f"Q{selected_quarter}" if selected_quarter is not None else period
+    q1, q2, q3 = st.columns(3)
+    q1.metric(f"Meta ({quarter_suffix})", fmt_brl_abbrev(perf_kpis.meta))
+    q2.metric(f"Realizado ({quarter_suffix})", fmt_brl_abbrev(perf_kpis.realizado))
+    q3.metric(f"Saldo a Faturar ({quarter_suffix})", fmt_brl_abbrev(perf_kpis.gap))
+
+    perf = vendedor_performance_period(sheets, year, selected_month, effective_ytd, selected_quarter)
     if perf.empty:
         st.info("Pendencia: metas/realizado por vendedor nao disponivel")
     else:

@@ -19,10 +19,20 @@ class KPIs:
     atividades_semana: Optional[float]
 
 
-def _period_mask(df: pd.DataFrame, year: int, month: Optional[int], ytd: bool) -> pd.Series:
+def _period_mask(
+    df: pd.DataFrame,
+    year: int,
+    month: Optional[int],
+    ytd: bool,
+    quarter: Optional[int] = None,
+) -> pd.Series:
     if "data" not in df.columns:
         return pd.Series(True, index=df.index)
     dfy = df["data"].dt.year == year
+    if quarter is not None:
+        q_start = (int(quarter) - 1) * 3 + 1
+        q_end = q_start + 2
+        return dfy & df["data"].dt.month.between(q_start, q_end)
     if ytd:
         today = pd.Timestamp.today()
         return dfy & (df["data"].dt.month <= today.month)
@@ -31,7 +41,13 @@ def _period_mask(df: pd.DataFrame, year: int, month: Optional[int], ytd: bool) -
     return dfy & (df["data"].dt.month == month)
 
 
-def compute_kpis(sheets: Dict[str, pd.DataFrame], year: int, month: Optional[int], ytd: bool) -> KPIs:
+def compute_kpis(
+    sheets: Dict[str, pd.DataFrame],
+    year: int,
+    month: Optional[int],
+    ytd: bool,
+    quarter: Optional[int] = None,
+) -> KPIs:
     opps = sheets.get("oportunidades", pd.DataFrame())
     real = sheets.get("realizado", pd.DataFrame())
     metas = sheets.get("metas", pd.DataFrame())
@@ -39,12 +55,12 @@ def compute_kpis(sheets: Dict[str, pd.DataFrame], year: int, month: Optional[int
 
     realizado = 0.0
     if not real.empty and "receita" in real.columns:
-        mask = _period_mask(real, year, month, ytd)
+        mask = _period_mask(real, year, month, ytd, quarter)
         realizado = float(real.loc[mask, "receita"].fillna(0).sum())
 
     meta = 0.0
     if not metas.empty and "meta" in metas.columns:
-        mask = _period_mask(metas, year, month, ytd)
+        mask = _period_mask(metas, year, month, ytd, quarter)
         meta = float(metas.loc[mask, "meta"].fillna(0).sum())
 
     ating = (realizado / meta * 100) if meta else 0.0
@@ -81,7 +97,13 @@ def compute_kpis(sheets: Dict[str, pd.DataFrame], year: int, month: Optional[int
     )
 
 
-def vendedor_performance_period(sheets: Dict[str, pd.DataFrame], year: int, month: Optional[int], ytd: bool) -> pd.DataFrame:
+def vendedor_performance_period(
+    sheets: Dict[str, pd.DataFrame],
+    year: int,
+    month: Optional[int],
+    ytd: bool,
+    quarter: Optional[int] = None,
+) -> pd.DataFrame:
     def _vendor_key(value: object) -> str:
         txt = str(value or "").strip().upper()
         if not txt:
@@ -97,7 +119,7 @@ def vendedor_performance_period(sheets: Dict[str, pd.DataFrame], year: int, mont
         metas = metas.copy()
         if "data" in metas.columns:
             metas["data"] = pd.to_datetime(metas["data"], errors="coerce")
-            metas = metas[_period_mask(metas, year, month, ytd)]
+            metas = metas[_period_mask(metas, year, month, ytd, quarter)]
         if "meta" not in metas.columns:
             metas["meta"] = 0.0
         metas["meta"] = pd.to_numeric(metas["meta"], errors="coerce").fillna(0)
@@ -114,7 +136,7 @@ def vendedor_performance_period(sheets: Dict[str, pd.DataFrame], year: int, mont
         real = real.copy()
         if "data" in real.columns:
             real["data"] = pd.to_datetime(real["data"], errors="coerce")
-            real = real[_period_mask(real, year, month, ytd)]
+            real = real[_period_mask(real, year, month, ytd, quarter)]
         if "receita" not in real.columns:
             real["receita"] = 0.0
         real["receita"] = pd.to_numeric(real["receita"], errors="coerce").fillna(0)
@@ -177,7 +199,9 @@ def sparkline_last_months(df: pd.DataFrame, months: int = 6) -> pd.DataFrame:
     return df.tail(months)
 
 
-def period_label(year: int, month: Optional[int], ytd: bool) -> str:
+def period_label(year: int, month: Optional[int], ytd: bool, quarter: Optional[int] = None) -> str:
+    if quarter is not None:
+        return f"Q{int(quarter)} {year}"
     if ytd or month is None:
         return f"YTD {year}"
     return pd.Timestamp(year=year, month=month, day=1).strftime("%b/%Y").upper()
