@@ -8,10 +8,18 @@ data/google/client_secret.json
 
 # Bling secrets
 bling_api/bling_tokens.json
+bling_api/bling_tokens_cr.json
 bling_api/*.jsonl
 !bling_api/vendas_2026_cache.jsonl
 !bling_api/vendas_2026_cache_cr.jsonl
 !bling_api/nfe_2026_cache_cr.jsonl
+bling_api/bling_sync_report*.json
+bling_api/_write_test.tmp
 
 # Outputs
+out/*
 out/ui_acceptance.md
+
+# Local labs and heavy automation workspace
+playwright-e2e/
+aios-lab/
