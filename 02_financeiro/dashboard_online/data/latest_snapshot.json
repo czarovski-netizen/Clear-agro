@@ -1,0 +1,1102 @@
+{
+  "generated_at": "2026-03-24T21:10:04.573947",
+  "run_id": "local_scope_fix_20260320_v7",
+  "source_run_dir": "C:\\Users\\cesar.zarovski\\Documents\\Clear_OS\\02_financeiro\\dre\\finance-recon-hub\\out\\aios\\monthly-fin-close\\local_scope_fix_20260320_v7",
+  "health": {
+    "run_id": "local_scope_fix_20260320_v7",
+    "ready": true,
+    "metabase_collection": "Clear OS / Financeiro / v1",
+    "sql_cards_dir": "C:\\Users\\cesar.zarovski\\Documents\\Clear_OS\\dashboards\\metabase",
+    "checks": [
+      {
+        "check": "required_file:02_financeiro/dre/finance-recon-hub/out/aios/monthly-fin-close/local_scope_fix_20260320_v7/control_tower/data/exports/dre_mckinsey_mensal.csv",
+        "ok": true
+      },
+      {
+        "check": "required_file:02_financeiro/dre/finance-recon-hub/out/aios/monthly-fin-close/local_scope_fix_20260320_v7/control_tower/data/exports/dre_mckinsey_resumo.csv",
+        "ok": true
+      },
+      {
+        "check": "required_file:02_financeiro/dre/finance-recon-hub/out/aios/monthly-fin-close/local_scope_fix_20260320_v7/control_tower/data/exports/qa_finance_summary.md",
+        "ok": true
+      },
+      {
+        "check": "required_status:02_financeiro/dre/finance-recon-hub/out/aios/monthly-fin-close/local_scope_fix_20260320_v7/control_tower/out/finance_ingest_hub_local_scope_fix_20260320_v7_status.json",
+        "ok": true
+      },
+      {
+        "check": "required_status:02_financeiro/dre/finance-recon-hub/out/aios/monthly-fin-close/local_scope_fix_20260320_v7/control_tower/out/dre_engine_mckinsey_local_scope_fix_20260320_v7_status.json",
+        "ok": true
+      },
+      {
+        "check": "required_status:02_financeiro/dre/finance-recon-hub/out/aios/monthly-fin-close/local_scope_fix_20260320_v7/control_tower/out/finance_qa_audit_local_scope_fix_20260320_v7_status.json",
+        "ok": true
+      },
+      {
+        "check": "required_status:02_financeiro/dre/finance-recon-hub/out/aios/monthly-fin-close/local_scope_fix_20260320_v7/control_tower/out/ap_cost_classifier_local_scope_fix_20260320_v7_status.json",
+        "ok": true
+      },
+      {
+        "check": "quality_gate:reconciliation_status",
+        "ok": true
+      }
+    ],
+    "quality_gate": {
+      "ok": true,
+      "source_file": "C:\\Users\\cesar.zarovski\\Documents\\Clear_OS\\logs\\integration\\status\\bling_supabase_reconciliation_bling_recon_qualityfix_cr_20260316_201720_status.json",
+      "detail": "status=success, fail=0"
+    },
+    "latest_status_files": {
+      "02_financeiro/dre/finance-recon-hub/out/aios/monthly-fin-close/local_scope_fix_20260320_v7/control_tower/out/finance_ingest_hub_local_scope_fix_20260320_v7_status.json": "C:\\Users\\cesar.zarovski\\Documents\\Clear_OS\\02_financeiro\\dre\\finance-recon-hub\\out\\aios\\monthly-fin-close\\local_scope_fix_20260320_v7\\control_tower\\out\\finance_ingest_hub_local_scope_fix_20260320_v7_status.json",
+      "02_financeiro/dre/finance-recon-hub/out/aios/monthly-fin-close/local_scope_fix_20260320_v7/control_tower/out/dre_engine_mckinsey_local_scope_fix_20260320_v7_status.json": "C:\\Users\\cesar.zarovski\\Documents\\Clear_OS\\02_financeiro\\dre\\finance-recon-hub\\out\\aios\\monthly-fin-close\\local_scope_fix_20260320_v7\\control_tower\\out\\dre_engine_mckinsey_local_scope_fix_20260320_v7_status.json",
+      "02_financeiro/dre/finance-recon-hub/out/aios/monthly-fin-close/local_scope_fix_20260320_v7/control_tower/out/finance_qa_audit_local_scope_fix_20260320_v7_status.json": "C:\\Users\\cesar.zarovski\\Documents\\Clear_OS\\02_financeiro\\dre\\finance-recon-hub\\out\\aios\\monthly-fin-close\\local_scope_fix_20260320_v7\\control_tower\\out\\finance_qa_audit_local_scope_fix_20260320_v7_status.json",
+      "02_financeiro/dre/finance-recon-hub/out/aios/monthly-fin-close/local_scope_fix_20260320_v7/control_tower/out/ap_cost_classifier_local_scope_fix_20260320_v7_status.json": "C:\\Users\\cesar.zarovski\\Documents\\Clear_OS\\02_financeiro\\dre\\finance-recon-hub\\out\\aios\\monthly-fin-close\\local_scope_fix_20260320_v7\\control_tower\\out\\ap_cost_classifier_local_scope_fix_20260320_v7_status.json"
+    },
+    "launch_cmd": "C:\\Users\\cesar.zarovski\\Documents\\Clear_OS\\02_financeiro\\dre\\finance-recon-hub\\out\\aios\\monthly-fin-close\\local_scope_fix_20260320_v7\\control_tower\\out\\launch_dashboard_financeiro_v1_local_scope_fix_20260320_v7.cmd",
+    "generated_at": "2026-03-20T21:47:56Z"
+  },
+  "classic_kpis": {
+    "ap_aberto": 57136174.24,
+    "ar_aberto": 12017406.56,
+    "ap_vencido": 45891039.43,
+    "ar_vencido": 4294602.52,
+    "fluxo_liquido_previsto_30d": -342361.19,
+    "aging_ap": [
+      {
+        "bucket": "Vencido >60",
+        "valor": 43098719.3
+      },
+      {
+        "bucket": "Vencido 31-60",
+        "valor": 1121320.97
+      },
+      {
+        "bucket": "Vencido 1-30",
+        "valor": 1670999.16
+      },
+      {
+        "bucket": "A vencer 0-30",
+        "valor": 815456.62
+      },
+      {
+        "bucket": "A vencer 31-60",
+        "valor": 945580.44
+      },
+      {
+        "bucket": "A vencer >60",
+        "valor": 9484097.75
+      }
+    ],
+    "aging_ar": [
+      {
+        "bucket": "Vencido >60",
+        "valor": 2997211.71
+      },
+      {
+        "bucket": "Vencido 31-60",
+        "valor": 678581.81
+      },
+      {
+        "bucket": "Vencido 1-30",
+        "valor": 618809.0
+      },
+      {
+        "bucket": "A vencer 0-30",
+        "valor": 473095.43
+      },
+      {
+        "bucket": "A vencer 31-60",
+        "valor": 3383217.72
+      },
+      {
+        "bucket": "A vencer >60",
+        "valor": 3866490.89
+      }
+    ],
+    "quality_status": "PASS"
+  },
+  "summary": {
+    "receita_liquida_total": 14772772.81,
+    "cmv_proxy_total": 5170470.48,
+    "lucro_bruto_total": 9602302.33,
+    "custos_variaveis_total": 5132280.5,
+    "margem_contribuicao_total": 4470021.83,
+    "custo_fixo_total": 3843051.51,
+    "ebitda_total": 626970.32,
+    "margem_bruta_pct_total": 0.65
+  },
+  "monthly": [
+    {
+      "mes": "2025-01",
+      "mes_num": 1,
+      "receita_liquida": 664092.7300000001,
+      "custos_variaveis_total": 253459.74,
+      "custo_fixo_base": 222370.89,
+      "margem_contribuicao": 178200.53,
+      "ebitda": -44170.36
+    },
+    {
+      "mes": "2025-02",
+      "mes_num": 2,
+      "receita_liquida": 1394153.41,
+      "custos_variaveis_total": 283494.45,
+      "custo_fixo_base": 277163.02,
+      "margem_contribuicao": 622705.27,
+      "ebitda": 345542.25
+    },
+    {
+      "mes": "2025-03",
+      "mes_num": 3,
+      "receita_liquida": 674624.51,
+      "custos_variaveis_total": 332434.83,
+      "custo_fixo_base": 271218.31,
+      "margem_contribuicao": 106071.1,
+      "ebitda": -165147.21
+    },
+    {
+      "mes": "2025-04",
+      "mes_num": 4,
+      "receita_liquida": 880273.24,
+      "custos_variaveis_total": 403255.33,
+      "custo_fixo_base": 301587.85,
+      "margem_contribuicao": 168922.28,
+      "ebitda": -132665.57
+    },
+    {
+      "mes": "2025-05",
+      "mes_num": 5,
+      "receita_liquida": 379852.23,
+      "custos_variaveis_total": 175129.54,
+      "custo_fixo_base": 319750.6,
+      "margem_contribuicao": 71774.41,
+      "ebitda": -247976.19
+    },
+    {
+      "mes": "2025-06",
+      "mes_num": 6,
+      "receita_liquida": 943429.8,
+      "custos_variaveis_total": 206178.8,
+      "custo_fixo_base": 361409.17,
+      "margem_contribuicao": 407050.57,
+      "ebitda": 45641.4
+    },
+    {
+      "mes": "2025-07",
+      "mes_num": 7,
+      "receita_liquida": 1535443.01,
+      "custos_variaveis_total": 354735.19,
+      "custo_fixo_base": 368557.37,
+      "margem_contribuicao": 643302.77,
+      "ebitda": 274745.4
+    },
+    {
+      "mes": "2025-08",
+      "mes_num": 8,
+      "receita_liquida": 2047453.48,
+      "custos_variaveis_total": 592714.73,
+      "custo_fixo_base": 323052.35,
+      "margem_contribuicao": 738130.03,
+      "ebitda": 415077.68
+    },
+    {
+      "mes": "2025-09",
+      "mes_num": 9,
+      "receita_liquida": 2122896.25,
+      "custos_variaveis_total": 1016139.81,
+      "custo_fixo_base": 313981.2,
+      "margem_contribuicao": 363742.75,
+      "ebitda": 49761.55
+    },
+    {
+      "mes": "2025-10",
+      "mes_num": 10,
+      "receita_liquida": 1663489.9700000002,
+      "custos_variaveis_total": 627430.35,
+      "custo_fixo_base": 391684.5,
+      "margem_contribuicao": 453838.13,
+      "ebitda": 62153.63
+    },
+    {
+      "mes": "2025-11",
+      "mes_num": 11,
+      "receita_liquida": 1275605.87,
+      "custos_variaveis_total": 509280.67,
+      "custo_fixo_base": 356945.36,
+      "margem_contribuicao": 319863.15,
+      "ebitda": -37082.21
+    },
+    {
+      "mes": "2025-12",
+      "mes_num": 12,
+      "receita_liquida": 1191458.31,
+      "custos_variaveis_total": 378027.06,
+      "custo_fixo_base": 335330.89,
+      "margem_contribuicao": 396420.84,
+      "ebitda": 61089.95
+    }
+  ],
+  "qa": {
+    "warn_count": 1,
+    "fail_count": 0,
+    "negative_ebitda_months": 5,
+    "checks": [
+      {
+        "check": "colunas_obrigatorias",
+        "ok": "True",
+        "status": "PASS",
+        "details": ""
+      },
+      {
+        "check": "meses_12",
+        "ok": "True",
+        "status": "PASS",
+        "details": ""
+      },
+      {
+        "check": "receita_liquida_formula",
+        "ok": "True",
+        "status": "PASS",
+        "details": ""
+      },
+      {
+        "check": "lucro_bruto_formula",
+        "ok": "True",
+        "status": "PASS",
+        "details": ""
+      },
+      {
+        "check": "ebitda_formula",
+        "ok": "True",
+        "status": "PASS",
+        "details": ""
+      },
+      {
+        "check": "sem_nan_numerico",
+        "ok": "True",
+        "status": "PASS",
+        "details": ""
+      },
+      {
+        "check": "scope_metadata_presente",
+        "ok": "True",
+        "status": "PASS",
+        "details": ""
+      },
+      {
+        "check": "scope_receita_esperado",
+        "ok": "True",
+        "status": "PASS",
+        "details": "esperado=empresa_receita_operacional; atual=empresa_receita_operacional"
+      },
+      {
+        "check": "scope_basis_no_output",
+        "ok": "True",
+        "status": "PASS",
+        "details": ""
+      },
+      {
+        "check": "meses_ebitda_negativo_monitorado",
+        "ok": "True",
+        "status": "WARN",
+        "details": "meses_negativos=5; limite_warn=4"
+      },
+      {
+        "check": "margem_contribuicao_negativa",
+        "ok": "True",
+        "status": "PASS",
+        "details": ""
+      }
+    ]
+  },
+  "governance": {
+    "review_count": 475,
+    "review_total_value": 9416120.79,
+    "pending_count": 35,
+    "pending_total_value": 256851.72,
+    "top_review": [
+      {
+        "fornecedor": "Emerson Abel Towenko Garcia",
+        "valor_total": 1180571.39,
+        "qtd_lancamentos": 151,
+        "motivo_governanca": "fornecedor pessoa fisica sem regra deterministica"
+      },
+      {
+        "fornecedor": "Cesar Zarovski",
+        "valor_total": 564045.6,
+        "qtd_lancamentos": 84,
+        "motivo_governanca": "fornecedor pessoa fisica sem regra deterministica"
+      },
+      {
+        "fornecedor": "Ademar De Assis Ferreira",
+        "valor_total": 443965.39,
+        "qtd_lancamentos": 122,
+        "motivo_governanca": "fornecedor pessoa fisica sem regra deterministica"
+      },
+      {
+        "fornecedor": "ADEMAR FERREIRA",
+        "valor_total": 293953.44,
+        "qtd_lancamentos": 28,
+        "motivo_governanca": "fornecedor sem sinal suficiente no nome"
+      },
+      {
+        "fornecedor": "LUANA TALITA BARBOSA",
+        "valor_total": 274738.21,
+        "qtd_lancamentos": 70,
+        "motivo_governanca": "fornecedor pessoa fisica sem regra deterministica"
+      },
+      {
+        "fornecedor": "URIEL DILELI LUPEPSA",
+        "valor_total": 266848.85,
+        "qtd_lancamentos": 125,
+        "motivo_governanca": "fornecedor pessoa fisica sem regra deterministica"
+      },
+      {
+        "fornecedor": "CLAUDIA REGINA BARBIERI",
+        "valor_total": 245579.8,
+        "qtd_lancamentos": 92,
+        "motivo_governanca": "fornecedor pessoa fisica sem regra deterministica"
+      },
+      {
+        "fornecedor": "CESAR DOS SANTOS FERREIRA",
+        "valor_total": 232404.36,
+        "qtd_lancamentos": 82,
+        "motivo_governanca": "fornecedor pessoa fisica sem regra deterministica"
+      },
+      {
+        "fornecedor": "Renan Cagol",
+        "valor_total": 211659.57,
+        "qtd_lancamentos": 117,
+        "motivo_governanca": "fornecedor pessoa fisica sem regra deterministica"
+      },
+      {
+        "fornecedor": "MIGUEL ANGELO FREITAS",
+        "valor_total": 203784.76,
+        "qtd_lancamentos": 115,
+        "motivo_governanca": "fornecedor pessoa fisica sem regra deterministica"
+      }
+    ],
+    "top_pending": [
+      {
+        "fornecedor": "Fornecedor Pendente (contato_17217754676)",
+        "valor_total": 87352.37,
+        "qtd_lancamentos": 67,
+        "motivo_governanca": "contato sem nome validado"
+      },
+      {
+        "fornecedor": "Fornecedor Pendente (contato_15520000163)",
+        "valor_total": 43545.24,
+        "qtd_lancamentos": 20,
+        "motivo_governanca": "contato sem nome validado"
+      },
+      {
+        "fornecedor": "Fornecedor Pendente (contato_17605758149)",
+        "valor_total": 34175.99,
+        "qtd_lancamentos": 25,
+        "motivo_governanca": "contato sem nome validado"
+      },
+      {
+        "fornecedor": "Fornecedor Pendente (contato_15493984329)",
+        "valor_total": 22935.0,
+        "qtd_lancamentos": 5,
+        "motivo_governanca": "contato sem nome validado"
+      },
+      {
+        "fornecedor": "Fornecedor Pendente (contato_16811119601)",
+        "valor_total": 12038.880000000001,
+        "qtd_lancamentos": 2,
+        "motivo_governanca": "contato sem nome validado"
+      },
+      {
+        "fornecedor": "Fornecedor Pendente (contato_11490432212)",
+        "valor_total": 9482.03,
+        "qtd_lancamentos": 18,
+        "motivo_governanca": "contato sem nome validado"
+      },
+      {
+        "fornecedor": "Fornecedor Pendente (contato_11705014388)",
+        "valor_total": 7737.87,
+        "qtd_lancamentos": 11,
+        "motivo_governanca": "contato sem nome validado"
+      },
+      {
+        "fornecedor": "Fornecedor Pendente (contato_15258489811)",
+        "valor_total": 5699.82,
+        "qtd_lancamentos": 1,
+        "motivo_governanca": "contato sem nome validado"
+      },
+      {
+        "fornecedor": "Fornecedor Pendente (contato_16033119979)",
+        "valor_total": 5590.55,
+        "qtd_lancamentos": 5,
+        "motivo_governanca": "contato sem nome validado"
+      },
+      {
+        "fornecedor": "Fornecedor Pendente (contato_14659745995)",
+        "valor_total": 3060.0,
+        "qtd_lancamentos": 1,
+        "motivo_governanca": "contato sem nome validado"
+      }
+    ]
+  },
+  "ap_governance": {
+    "ap_total_value": 51697323.43,
+    "ap_total_rows": 13763,
+    "mapped_status_value": [
+      {
+        "label": "classificado_regra_nome",
+        "valor": 42024350.92
+      },
+      {
+        "label": "revisao_manual_governanca",
+        "valor": 9416120.79
+      },
+      {
+        "label": "pendente_nome_contato",
+        "valor": 256851.72
+      }
+    ],
+    "mapped_status_count": [
+      {
+        "label": "classificado_regra_nome",
+        "qtd": 8147
+      },
+      {
+        "label": "revisao_manual_governanca",
+        "qtd": 5405
+      },
+      {
+        "label": "pendente_nome_contato",
+        "qtd": 211
+      }
+    ],
+    "category_value": [
+      {
+        "label": "Variavel - Insumos",
+        "valor": 16828334.23
+      },
+      {
+        "label": "Fixo - Financeiro",
+        "valor": 15472081.23
+      },
+      {
+        "label": "A revisar - Governanca",
+        "valor": 9672972.51
+      },
+      {
+        "label": "Fixo - G&A",
+        "valor": 3380332.43
+      },
+      {
+        "label": "Fixo - Tributos",
+        "valor": 2099024.63
+      },
+      {
+        "label": "Fixo - Estrutura",
+        "valor": 1413019.48
+      },
+      {
+        "label": "Variavel - Logistica",
+        "valor": 1314647.5
+      },
+      {
+        "label": "Fixo - Servicos Profissionais",
+        "valor": 1196117.65
+      },
+      {
+        "label": "Fixo - Pessoal",
+        "valor": 174660.54
+      },
+      {
+        "label": "Variavel - Marketing",
+        "valor": 76307.0
+      },
+      {
+        "label": "Fixo - Tecnologia",
+        "valor": 69826.23
+      }
+    ],
+    "subcategory_value": [
+      {
+        "label": "Juros e operacoes financeiras",
+        "valor": 15472081.23
+      },
+      {
+        "label": "Quimicos e materias-primas",
+        "valor": 13837395.57
+      },
+      {
+        "label": "Classificacao ambigua",
+        "valor": 9416120.79
+      },
+      {
+        "label": "Administrativo geral",
+        "valor": 3345822.57
+      },
+      {
+        "label": "Embalagens e materiais",
+        "valor": 2990938.66
+      },
+      {
+        "label": "Impostos e encargos",
+        "valor": 2099024.63
+      },
+      {
+        "label": "Frete e distribuicao",
+        "valor": 1314647.5
+      },
+      {
+        "label": "Consultoria e servicos especializados",
+        "valor": 1196117.65
+      },
+      {
+        "label": "Manutencao e equipamentos",
+        "valor": 1048531.23
+      },
+      {
+        "label": "Facilities e ocupacao",
+        "valor": 364488.25
+      },
+      {
+        "label": "Nome do fornecedor pendente",
+        "valor": 256851.72
+      },
+      {
+        "label": "Beneficios",
+        "valor": 174660.54
+      }
+    ],
+    "top_suppliers": [
+      {
+        "label": "SANTANDER",
+        "valor": 5189076.47
+      },
+      {
+        "label": "SICREDI",
+        "valor": 2290357.39
+      },
+      {
+        "label": "ALLBIOM SOLUCOES EM BIOPROCESSOS",
+        "valor": 2143062.5
+      },
+      {
+        "label": "Brenntag Quimica Brasil Ltda",
+        "valor": 1648915.95
+      },
+      {
+        "label": "CAIXA ECONOMICA FEDERAL - CAPITAL DE GIRO",
+        "valor": 1497673.41
+      },
+      {
+        "label": "GENETICA TECNOLOGIAS AMBIENTAIS LTDA-MAPA EP/SC 3327-8",
+        "valor": 1355112.95
+      },
+      {
+        "label": "Receita Federal",
+        "valor": 1286076.74
+      },
+      {
+        "label": "ZENAPLAST LTDA",
+        "valor": 1233075.6
+      },
+      {
+        "label": "BANDEIRANTE QUIMICA LTDA",
+        "valor": 1220663.27
+      },
+      {
+        "label": "SICREDI CAP GIRO 680000",
+        "valor": 1190646.9
+      },
+      {
+        "label": "Emerson Abel Towenko Garcia",
+        "valor": 1180571.39
+      },
+      {
+        "label": "ITAU DPL DESCONTADAS",
+        "valor": 1018689.0
+      },
+      {
+        "label": "Companhia Biochemicals do Brasil",
+        "valor": 895490.52
+      },
+      {
+        "label": "P2P ADMINISTRAÇÃO DE BENS E SERVICOS LTDA",
+        "valor": 826600.04
+      },
+      {
+        "label": "BUSCHLE & LEPPER S.A. - CURITIBA",
+        "valor": 789140.61
+      }
+    ],
+    "confidence_count": [
+      {
+        "label": "baixa",
+        "qtd": 5616
+      },
+      {
+        "label": "alta",
+        "qtd": 5506
+      },
+      {
+        "label": "media",
+        "qtd": 2641
+      }
+    ]
+  },
+  "quality_reconciliation": {
+    "quality_check_total": 8,
+    "quality_check_ok": 8,
+    "quality_check_fail": 0,
+    "health_ready": true,
+    "gate_detail": "status=success, fail=0",
+    "latest_reconciliation": {
+      "exists": true,
+      "file": "C:\\Users\\cesar.zarovski\\Documents\\Clear_OS\\logs\\integration\\status\\bling_supabase_reconciliation_bling_recon_qualityfix_cr_20260316_201720_status.json",
+      "name": "bling_supabase_reconciliation_bling_recon_qualityfix_cr_20260316_201720_status.json",
+      "generated_at": "2026-03-16T20:18:12",
+      "status": "success",
+      "run_id": "bling_recon_qualityfix_cr_20260316_201720",
+      "checks_summary": {
+        "pass": 6,
+        "fail": 0
+      },
+      "company_scope": "CR",
+      "warnings": []
+    },
+    "latest_reconciliation_cz": {
+      "exists": true,
+      "file": "C:\\Users\\cesar.zarovski\\Documents\\Clear_OS\\logs\\integration\\status\\bling_supabase_reconciliation_bling_recon_qualityfix_cz_20260316_201212_status.json",
+      "name": "bling_supabase_reconciliation_bling_recon_qualityfix_cz_20260316_201212_status.json",
+      "generated_at": "2026-03-16T20:16:46",
+      "status": "success",
+      "run_id": "bling_recon_qualityfix_cz_20260316_201212",
+      "checks_summary": {
+        "pass": 6,
+        "fail": 0
+      },
+      "company_scope": "CZ",
+      "warnings": []
+    },
+    "latest_reconciliation_cr": {
+      "exists": true,
+      "file": "C:\\Users\\cesar.zarovski\\Documents\\Clear_OS\\logs\\integration\\status\\bling_supabase_reconciliation_bling_recon_qualityfix_cr_20260316_201720_status.json",
+      "name": "bling_supabase_reconciliation_bling_recon_qualityfix_cr_20260316_201720_status.json",
+      "generated_at": "2026-03-16T20:18:12",
+      "status": "success",
+      "run_id": "bling_recon_qualityfix_cr_20260316_201720",
+      "checks_summary": {
+        "pass": 6,
+        "fail": 0
+      },
+      "company_scope": "CR",
+      "warnings": []
+    },
+    "latest_ingest": {
+      "exists": true,
+      "file": "C:\\Users\\cesar.zarovski\\Documents\\Clear_OS\\logs\\integration\\status\\finance_ingest_hub_bling_v1_qualityfix_cr_20260316_201720_status.json",
+      "name": "finance_ingest_hub_bling_v1_qualityfix_cr_20260316_201720_status.json",
+      "generated_at": "",
+      "status": "success",
+      "run_id": "bling_v1_qualityfix_cr_20260316_201720",
+      "checks_summary": {},
+      "company_scope": "",
+      "warnings": []
+    },
+    "latest_import_generator": {
+      "exists": true,
+      "file": "C:\\Users\\cesar.zarovski\\Documents\\Clear_OS\\logs\\integration\\status\\bling_import_generator_bling_import_v1_qualityfix_cr_20260316_201720_status.json",
+      "name": "bling_import_generator_bling_import_v1_qualityfix_cr_20260316_201720_status.json",
+      "generated_at": "",
+      "status": "success",
+      "run_id": "bling_import_v1_qualityfix_cr_20260316_201720",
+      "checks_summary": {},
+      "company_scope": "",
+      "warnings": []
+    },
+    "latest_cutover_health": {
+      "exists": true,
+      "file": "C:\\Users\\cesar.zarovski\\Documents\\Clear_OS\\logs\\integration\\status\\check_bling_cutover_health_monitoramento_inicial_status.json",
+      "name": "check_bling_cutover_health_monitoramento_inicial_status.json",
+      "generated_at": "2026-03-17T13:10:52Z",
+      "status": "success",
+      "run_id": "monitoramento_inicial",
+      "checks_summary": {},
+      "company_scope": "",
+      "warnings": []
+    }
+  },
+  "cash_projection": {
+    "days": [
+      {
+        "data": "2026-03-24",
+        "inflow": 0.0,
+        "outflow": 10079.16,
+        "net": -10079.16,
+        "cumulative_net": -10079.16
+      },
+      {
+        "data": "2026-03-25",
+        "inflow": 0.0,
+        "outflow": 18131.69,
+        "net": -18131.69,
+        "cumulative_net": -28210.85
+      },
+      {
+        "data": "2026-03-26",
+        "inflow": 0.0,
+        "outflow": 25720.51,
+        "net": -25720.51,
+        "cumulative_net": -53931.36
+      },
+      {
+        "data": "2026-03-27",
+        "inflow": 0.0,
+        "outflow": 16009.57,
+        "net": -16009.57,
+        "cumulative_net": -69940.93
+      },
+      {
+        "data": "2026-03-28",
+        "inflow": 89241.6,
+        "outflow": 47426.54,
+        "net": 41815.06,
+        "cumulative_net": -28125.87
+      },
+      {
+        "data": "2026-03-29",
+        "inflow": 3000.0,
+        "outflow": 5500.0,
+        "net": -2500.0,
+        "cumulative_net": -30625.87
+      },
+      {
+        "data": "2026-03-30",
+        "inflow": 117392.94,
+        "outflow": 2700.0,
+        "net": 114692.94,
+        "cumulative_net": 84067.07
+      },
+      {
+        "data": "2026-03-31",
+        "inflow": 0.0,
+        "outflow": 12440.0,
+        "net": -12440.0,
+        "cumulative_net": 71627.07
+      },
+      {
+        "data": "2026-04-01",
+        "inflow": 25311.6,
+        "outflow": 129204.67,
+        "net": -103893.07,
+        "cumulative_net": -32266.0
+      },
+      {
+        "data": "2026-04-02",
+        "inflow": 4134.04,
+        "outflow": 34613.52,
+        "net": -30479.48,
+        "cumulative_net": -62745.48
+      },
+      {
+        "data": "2026-04-03",
+        "inflow": 0.0,
+        "outflow": 35323.99,
+        "net": -35323.99,
+        "cumulative_net": -98069.47
+      },
+      {
+        "data": "2026-04-04",
+        "inflow": 76613.6,
+        "outflow": 3637.39,
+        "net": 72976.21,
+        "cumulative_net": -25093.26
+      },
+      {
+        "data": "2026-04-05",
+        "inflow": 0.0,
+        "outflow": 180146.43,
+        "net": -180146.43,
+        "cumulative_net": -205239.69
+      },
+      {
+        "data": "2026-04-06",
+        "inflow": 0.0,
+        "outflow": 9882.06,
+        "net": -9882.06,
+        "cumulative_net": -215121.75
+      },
+      {
+        "data": "2026-04-07",
+        "inflow": 0.0,
+        "outflow": 35712.83,
+        "net": -35712.83,
+        "cumulative_net": -250834.58
+      },
+      {
+        "data": "2026-04-08",
+        "inflow": 7680.0,
+        "outflow": 0.0,
+        "net": 7680.0,
+        "cumulative_net": -243154.58
+      },
+      {
+        "data": "2026-04-09",
+        "inflow": 0.0,
+        "outflow": 17746.74,
+        "net": -17746.74,
+        "cumulative_net": -260901.32
+      },
+      {
+        "data": "2026-04-10",
+        "inflow": 13190.0,
+        "outflow": 81404.04,
+        "net": -68214.04,
+        "cumulative_net": -329115.36
+      },
+      {
+        "data": "2026-04-11",
+        "inflow": 22005.0,
+        "outflow": 28653.71,
+        "net": -6648.71,
+        "cumulative_net": -335764.07
+      },
+      {
+        "data": "2026-04-12",
+        "inflow": 3278.88,
+        "outflow": 10128.56,
+        "net": -6849.68,
+        "cumulative_net": -342613.75
+      },
+      {
+        "data": "2026-04-13",
+        "inflow": 0.0,
+        "outflow": 4603.28,
+        "net": -4603.28,
+        "cumulative_net": -347217.03
+      },
+      {
+        "data": "2026-04-14",
+        "inflow": 0.0,
+        "outflow": 5401.67,
+        "net": -5401.67,
+        "cumulative_net": -352618.7
+      },
+      {
+        "data": "2026-04-15",
+        "inflow": 576.0,
+        "outflow": 23820.57,
+        "net": -23244.57,
+        "cumulative_net": -375863.27
+      },
+      {
+        "data": "2026-04-16",
+        "inflow": 5673.33,
+        "outflow": 6573.38,
+        "net": -900.05,
+        "cumulative_net": -376763.32
+      },
+      {
+        "data": "2026-04-17",
+        "inflow": 0.0,
+        "outflow": 18336.57,
+        "net": -18336.57,
+        "cumulative_net": -395099.89
+      },
+      {
+        "data": "2026-04-18",
+        "inflow": 0.0,
+        "outflow": 7539.8,
+        "net": -7539.8,
+        "cumulative_net": -402639.69
+      },
+      {
+        "data": "2026-04-19",
+        "inflow": 0.0,
+        "outflow": 0.0,
+        "net": 0.0,
+        "cumulative_net": -402639.69
+      },
+      {
+        "data": "2026-04-20",
+        "inflow": 74192.6,
+        "outflow": 35851.56,
+        "net": 38341.04,
+        "cumulative_net": -364298.65
+      },
+      {
+        "data": "2026-04-21",
+        "inflow": 0.0,
+        "outflow": 2295.0,
+        "net": -2295.0,
+        "cumulative_net": -366593.65
+      },
+      {
+        "data": "2026-04-22",
+        "inflow": 8947.6,
+        "outflow": 0.0,
+        "net": 8947.6,
+        "cumulative_net": -357646.05
+      },
+      {
+        "data": "2026-04-23",
+        "inflow": 21858.24,
+        "outflow": 6573.38,
+        "net": 15284.86,
+        "cumulative_net": -342361.19
+      }
+    ],
+    "inflow_30d": 473095.43,
+    "outflow_30d": 815456.62,
+    "net_30d": -342361.19,
+    "min_cumulative_30d": -402639.69,
+    "negative_cumulative_days": 29,
+    "top_inflows": [
+      {
+        "data": "2026-03-28",
+        "contato": "PONTO RURAL COM E DIST DE INSUMOS AGRICOLAS LTDA",
+        "valor": 87813.6,
+        "tipo": "inflow"
+      },
+      {
+        "data": "2026-04-04",
+        "contato": "PONTO RURAL COM E DIST DE INSUMOS AGRICOLAS LTDA",
+        "valor": 76613.6,
+        "tipo": "inflow"
+      },
+      {
+        "data": "2026-04-01",
+        "contato": "INDUSTRIAL MADEIREIRA COLONIZADORA RIO PARANA SA",
+        "valor": 25311.6,
+        "tipo": "inflow"
+      },
+      {
+        "data": "2026-03-30",
+        "contato": "Doglas Ivo Durigon",
+        "valor": 23200.0,
+        "tipo": "inflow"
+      },
+      {
+        "data": "2026-03-30",
+        "contato": "Doglas Ivo Durigon",
+        "valor": 23200.0,
+        "tipo": "inflow"
+      },
+      {
+        "data": "2026-03-30",
+        "contato": "Doglas Ivo Durigon",
+        "valor": 22100.0,
+        "tipo": "inflow"
+      },
+      {
+        "data": "2026-04-11",
+        "contato": "TERRAVITTA AGROSCIENCES LTDA",
+        "valor": 22005.0,
+        "tipo": "inflow"
+      },
+      {
+        "data": "2026-04-23",
+        "contato": "AGROSUL INSUMOS AGRICOLAS LTDA",
+        "valor": 21858.24,
+        "tipo": "inflow"
+      },
+      {
+        "data": "2026-04-20",
+        "contato": "LUIZ FERNANDO FREIRE PEREIRA CARVALHO",
+        "valor": 21000.0,
+        "tipo": "inflow"
+      },
+      {
+        "data": "2026-03-30",
+        "contato": "Doglas Ivo Durigon",
+        "valor": 17250.0,
+        "tipo": "inflow"
+      },
+      {
+        "data": "2026-03-30",
+        "contato": "Doglas Ivo Durigon",
+        "valor": 15930.0,
+        "tipo": "inflow"
+      },
+      {
+        "data": "2026-04-20",
+        "contato": "MARCIANO SILVONI",
+        "valor": 14000.0,
+        "tipo": "inflow"
+      }
+    ],
+    "top_outflows": [
+      {
+        "data": "2026-04-01",
+        "contato": "Contato 16377431103",
+        "valor": 96660.07,
+        "tipo": "outflow"
+      },
+      {
+        "data": "2026-04-05",
+        "contato": "Contato 16766465641",
+        "valor": 83566.62,
+        "tipo": "outflow"
+      },
+      {
+        "data": "2026-03-28",
+        "contato": "Contato 16766465641",
+        "valor": 43367.48,
+        "tipo": "outflow"
+      },
+      {
+        "data": "2026-04-07",
+        "contato": "Contato 16379064355",
+        "valor": 30651.58,
+        "tipo": "outflow"
+      },
+      {
+        "data": "2026-04-11",
+        "contato": "Contato 16672853904",
+        "valor": 25966.96,
+        "tipo": "outflow"
+      },
+      {
+        "data": "2026-04-20",
+        "contato": "Contato 15477072115",
+        "valor": 25623.96,
+        "tipo": "outflow"
+      },
+      {
+        "data": "2026-04-05",
+        "contato": "Contato 16998917634",
+        "valor": 23000.0,
+        "tipo": "outflow"
+      },
+      {
+        "data": "2026-04-05",
+        "contato": "Contato 16918308137",
+        "valor": 20000.0,
+        "tipo": "outflow"
+      },
+      {
+        "data": "2026-04-10",
+        "contato": "Contato 16766465641",
+        "valor": 18700.0,
+        "tipo": "outflow"
+      },
+      {
+        "data": "2026-04-15",
+        "contato": "Contato 16379058899",
+        "valor": 17560.64,
+        "tipo": "outflow"
+      },
+      {
+        "data": "2026-03-25",
+        "contato": "Contato 10542981703",
+        "valor": 13162.94,
+        "tipo": "outflow"
+      },
+      {
+        "data": "2026-04-10",
+        "contato": "Contato 16954457332",
+        "valor": 10448.72,
+        "tipo": "outflow"
+      }
+    ],
+    "opening_balance_available": false
+  }
+}
