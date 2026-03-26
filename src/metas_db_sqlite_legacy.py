@@ -10,6 +10,7 @@ import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[1]
 DB_PATH = ROOT / "data" / "metas.db"
+VENDOR_LINKS_PATH = ROOT / "data" / "vendor_links.csv"
 
 
 def _connect() -> sqlite3.Connection:
@@ -32,6 +33,7 @@ def init_db() -> None:
                 quarter INTEGER CHECK (quarter BETWEEN 1 AND 4),
                 estado TEXT NOT NULL,
                 vendedor_id TEXT,
+                empresa TEXT,
                 canal TEXT,
                 cultura TEXT,
                 meta_valor REAL NOT NULL CHECK (meta_valor >= 0),
@@ -48,9 +50,13 @@ def init_db() -> None:
         cur.execute(
             """
             CREATE UNIQUE INDEX IF NOT EXISTS uq_meta
-            ON metas(ano, periodo_tipo, mes, quarter, estado, vendedor_id, canal, cultura)
+            ON metas(ano, periodo_tipo, mes, quarter, estado, vendedor_id, empresa, canal, cultura)
             """
         )
+        cols = [row[1] for row in cur.execute("PRAGMA table_info(metas)").fetchall()]
+        if "empresa" not in cols:
+            cur.execute("ALTER TABLE metas ADD COLUMN empresa TEXT")
+        _backfill_empresa(cur)
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS ativos_custodia (
@@ -84,6 +90,53 @@ def init_db() -> None:
         conn.commit()
 
 
+def _vendor_company_maps() -> tuple[dict[str, str], set[str]]:
+    if not VENDOR_LINKS_PATH.exists():
+        return {}, set()
+    try:
+        df = pd.read_csv(VENDOR_LINKS_PATH, encoding="utf-8-sig")
+    except Exception:
+        return {}, set()
+    if df.empty:
+        return {}, set()
+    df.columns = [str(c).strip().lower() for c in df.columns]
+    for col in ["vendedor_id", "nome_meta", "nome_exibicao", "empresa"]:
+        if col not in df.columns:
+            df[col] = ""
+        df[col] = df[col].fillna("").astype(str).str.strip()
+    df["nome_ref"] = df["nome_meta"].where(df["nome_meta"] != "", df["nome_exibicao"])
+    df["empresa"] = df["empresa"].str.upper()
+    by_name: dict[str, str] = {}
+    ambiguous: set[str] = set()
+    grouped = df[df["nome_ref"] != ""].groupby("nome_ref")["empresa"].nunique().reset_index()
+    for _, row in grouped.iterrows():
+        name = str(row["nome_ref"]).strip()
+        if int(row["empresa"]) > 1:
+            ambiguous.add(name)
+        else:
+            company = df[df["nome_ref"] == name]["empresa"].iloc[0]
+            by_name[name] = company
+    return by_name, ambiguous
+
+
+def _backfill_empresa(cur: sqlite3.Cursor) -> None:
+    by_name, ambiguous = _vendor_company_maps()
+    rows = cur.execute("SELECT id, vendedor_id, empresa FROM metas").fetchall()
+    for row in rows:
+        meta_id = row[0]
+        vendedor = str(row[1] or "").strip()
+        empresa = str(row[2] or "").strip().upper() if len(row) > 2 else ""
+        if empresa:
+            continue
+        if vendedor in by_name:
+            resolved = by_name[vendedor]
+        elif vendedor in ambiguous:
+            resolved = "TODOS"
+        else:
+            resolved = "TODOS"
+        cur.execute("UPDATE metas SET empresa = ? WHERE id = ?", (resolved, meta_id))
+
+
 def _now() -> str:
     return datetime.utcnow().isoformat()
 
@@ -114,7 +167,7 @@ def list_metas(filters: Dict[str, Any] | None = None) -> pd.DataFrame:
     for key, val in filters.items():
         if val is None or val == "":
             continue
-        if key in {"ano","periodo_tipo","mes","quarter","estado","vendedor_id","status","canal","cultura"}:
+        if key in {"ano","periodo_tipo","mes","quarter","estado","vendedor_id","empresa","status","canal","cultura"}:
             if isinstance(val, (list, tuple, set)):
                 placeholders = ",".join(["?"] * len(val))
                 where.append(f"{key} IN ({placeholders})")
@@ -137,10 +190,10 @@ def create_meta(data: Dict[str, Any], actor_id: str = "system") -> int:
         cur = conn.cursor()
         cur.execute(
             """
-            INSERT INTO metas(ano, periodo_tipo, mes, quarter, estado, vendedor_id, canal, cultura,
+            INSERT INTO metas(ano, periodo_tipo, mes, quarter, estado, vendedor_id, empresa, canal, cultura,
                               meta_valor, meta_volume, realizado_valor, realizado_volume, status, observacoes,
                               created_at, updated_at)
-            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
                 payload["ano"],
@@ -149,6 +202,7 @@ def create_meta(data: Dict[str, Any], actor_id: str = "system") -> int:
                 payload.get("quarter"),
                 payload["estado"],
                 payload.get("vendedor_id"),
+                payload.get("empresa"),
                 payload.get("canal"),
                 payload.get("cultura"),
                 payload["meta_valor"],
@@ -297,11 +351,11 @@ def seed_demo() -> None:
     if not list_metas().empty:
         return
     demo = [
-        {"ano": 2026, "periodo_tipo": "MONTH", "mes": 1, "estado": "PR", "vendedor_id": "V001", "meta_valor": 120000, "realizado_valor": 90000, "status": "ATIVO"},
-        {"ano": 2026, "periodo_tipo": "MONTH", "mes": 1, "estado": "RS", "vendedor_id": "V002", "meta_valor": 110000, "realizado_valor": 70000, "status": "ATIVO"},
-        {"ano": 2026, "periodo_tipo": "MONTH", "mes": 2, "estado": "PR", "vendedor_id": "V001", "meta_valor": 130000, "realizado_valor": 60000, "status": "ATIVO"},
-        {"ano": 2026, "periodo_tipo": "QUARTER", "quarter": 1, "estado": "PR", "vendedor_id": "V001", "meta_valor": 360000, "realizado_valor": 150000, "status": "ATIVO"},
-        {"ano": 2026, "periodo_tipo": "QUARTER", "quarter": 1, "estado": "RS", "vendedor_id": "V002", "meta_valor": 330000, "realizado_valor": 120000, "status": "ATIVO"},
+        {"ano": 2026, "periodo_tipo": "MONTH", "mes": 1, "estado": "PR", "vendedor_id": "V001", "empresa": "CZ", "meta_valor": 120000, "realizado_valor": 90000, "status": "ATIVO"},
+        {"ano": 2026, "periodo_tipo": "MONTH", "mes": 1, "estado": "RS", "vendedor_id": "V002", "empresa": "CR", "meta_valor": 110000, "realizado_valor": 70000, "status": "ATIVO"},
+        {"ano": 2026, "periodo_tipo": "MONTH", "mes": 2, "estado": "PR", "vendedor_id": "V001", "empresa": "CZ", "meta_valor": 130000, "realizado_valor": 60000, "status": "ATIVO"},
+        {"ano": 2026, "periodo_tipo": "QUARTER", "quarter": 1, "estado": "PR", "vendedor_id": "V001", "empresa": "CZ", "meta_valor": 360000, "realizado_valor": 150000, "status": "ATIVO"},
+        {"ano": 2026, "periodo_tipo": "QUARTER", "quarter": 1, "estado": "RS", "vendedor_id": "V002", "empresa": "CR", "meta_valor": 330000, "realizado_valor": 120000, "status": "ATIVO"},
     ]
     for d in demo:
         d.update({"canal": None, "cultura": None, "meta_volume": None, "realizado_volume": None, "observacoes": None})

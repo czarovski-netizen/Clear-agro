@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from pathlib import Path
 from typing import Any
 
 import requests
 from requests.auth import HTTPBasicAuth
+from requests.exceptions import RequestException
 
 ROOT = Path(__file__).resolve().parent
 TOKEN_FILE = ROOT / "bling_tokens.json"
@@ -113,11 +115,37 @@ class BlingClient:
             "Content-Type": "application/json",
             "enable-jwt": "1",
         }
-        resp = requests.request(method=method, url=url, headers=headers, params=params, timeout=30)
-        if resp.status_code == 401:
-            self._refresh_token()
-            headers["Authorization"] = f"Bearer {self.tokens['access_token']}"
-            resp = requests.request(method=method, url=url, headers=headers, params=params, timeout=30)
+        backoff_s = 1.0
+        last_error: Exception | None = None
+        for attempt in range(6):
+            try:
+                resp = requests.request(
+                    method=method,
+                    url=url,
+                    headers=headers,
+                    params=params,
+                    timeout=(10, 30),
+                )
+            except RequestException as exc:
+                last_error = exc
+                time.sleep(backoff_s)
+                backoff_s = min(backoff_s * 2, 8.0)
+                continue
+            if resp.status_code == 401:
+                self._refresh_token()
+                headers["Authorization"] = f"Bearer {self.tokens['access_token']}"
+                continue
+            if resp.status_code != 429:
+                return resp
+            retry_after = (resp.headers.get("Retry-After") or "").strip()
+            try:
+                wait_s = max(float(retry_after), backoff_s)
+            except ValueError:
+                wait_s = backoff_s
+            time.sleep(wait_s)
+            backoff_s = min(backoff_s * 2, 8.0)
+        if last_error is not None:
+            raise RuntimeError(f"{method} {path} failed after retries: {type(last_error).__name__}: {last_error}")
         return resp
 
     def get_data(self, path: str, params: dict[str, Any] | None = None) -> list[dict[str, Any]]:

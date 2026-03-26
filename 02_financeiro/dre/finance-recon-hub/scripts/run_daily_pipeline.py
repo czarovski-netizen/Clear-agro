@@ -48,8 +48,6 @@ def main() -> int:
         str(datetime.now().year),
         "--modules",
         "contas_receber,contas_pagar",
-        "--max-pages",
-        "3",
     ]
     bling_dir = None
     try:

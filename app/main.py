@@ -72,6 +72,8 @@ st.markdown(
     h1, h2, h3 {color:#1f2a44;}
     div[data-testid="stMetricValue"] {font-size: 20px; white-space: nowrap;}
     div[data-testid="stMetricLabel"] {font-size: 12px;}
+    .crm-kpi-row div[data-testid="stMetricValue"] {font-size: 24px;}
+    .crm-kpi-row div[data-testid="stMetricLabel"] {font-size: 13px;}
     </style>
     """,
     unsafe_allow_html=True,
@@ -517,6 +519,18 @@ def filter_company_scope(df: pd.DataFrame, selected_company: str) -> pd.DataFram
     return df[df["empresa"].astype(str).str.upper() == str(selected_company).upper()]
 
 
+def filter_customer_scope(df: pd.DataFrame, selected_customer: str, columns: list[str] | None = None) -> pd.DataFrame:
+    if df.empty or selected_customer == "TODOS":
+        return df
+    columns = columns or ["cliente", "customer_name"]
+    mask = pd.Series(False, index=df.index)
+    selected_key = str(selected_customer).strip().upper()
+    for column in columns:
+        if column in df.columns:
+            mask = mask | df[column].fillna("").astype(str).str.strip().str.upper().eq(selected_key)
+    return df[mask]
+
+
 def filter_period_scope(
     df: pd.DataFrame,
     year: int,
@@ -584,15 +598,21 @@ def filter_sales_nature_scope(df: pd.DataFrame, selected_scope: str) -> pd.DataF
     if df.empty or selected_scope == "Tudo":
         return df
     out = df.copy()
+    cfop = out.get("cfop", pd.Series("", index=out.index)).fillna("").astype(str).str.strip()
     natureza_txt = (
         out.get("natureza_label", pd.Series("", index=out.index)).fillna("").astype(str)
         + " "
         + out.get("natureza", pd.Series("", index=out.index)).fillna("").astype(str)
+        + " "
+        + cfop
     ).str.upper()
-    receita = pd.to_numeric(out.get("receita", pd.Series(0, index=out.index)), errors="coerce").fillna(0)
+    receita_source = out.get("receita", out.get("valor_total", pd.Series(0, index=out.index)))
+    receita = pd.to_numeric(receita_source, errors="coerce").fillna(0)
     vendedor_id = out.get("vendedor_id", pd.Series("", index=out.index)).fillna("").astype(str).str.strip()
-    is_devolucao = natureza_txt.str.contains("DEVOL|RETORNO|ESTORNO|CANCEL", regex=True) | receita.lt(0)
-    is_non_sale = natureza_txt.str.contains("REMESSA|CONSIGN", regex=True)
+    is_return_cfop = cfop.str.match(r"^[1267]20[1-9]$|^[12]201$|^[56]202$")
+    is_non_sale_cfop = cfop.isin({"5910", "6910", "5911", "6911", "5917", "6917", "5949", "6949"})
+    is_devolucao = natureza_txt.str.contains("DEVOL|RETORNO|ESTORNO|CANCEL", regex=True) | receita.lt(0) | is_return_cfop
+    is_non_sale = natureza_txt.str.contains("REMESSA|CONSIGN|BONIFIC", regex=True) | is_non_sale_cfop
     is_vendor_zero = vendedor_id.eq("0")
     if selected_scope == "Vendas efetivas":
         return out[~is_devolucao & ~is_non_sale & ~is_vendor_zero & receita.gt(0)]
@@ -638,10 +658,465 @@ def filter_targets_view(
     return df
 
 
+def format_targets_listing(df: pd.DataFrame) -> pd.DataFrame:
+    if df.empty:
+        return df
+    out = df.copy()
+    if "meta_valor" in out.columns:
+        out["meta_valor"] = pd.to_numeric(out["meta_valor"], errors="coerce").fillna(0)
+    if "realizado_valor" in out.columns:
+        out["realizado_valor"] = pd.to_numeric(out["realizado_valor"], errors="coerce").fillna(0)
+    if {"meta_valor", "realizado_valor"}.issubset(out.columns):
+        if "atingimento_pct" not in out.columns:
+            out["atingimento_pct"] = out.apply(
+                lambda row: (row["realizado_valor"] / row["meta_valor"] * 100) if row["meta_valor"] else 0.0,
+                axis=1,
+            )
+        if "gap_valor" not in out.columns:
+            out["gap_valor"] = out["realizado_valor"] - out["meta_valor"]
+    if "status" in out.columns:
+        out["status"] = out["status"].apply(status_chip)
+    if "meta_valor" in out.columns:
+        out["meta_valor"] = out["meta_valor"].map(fmt_brl_full)
+    if "realizado_valor" in out.columns:
+        out["realizado_valor"] = out["realizado_valor"].map(fmt_brl_full)
+    if "gap_valor" in out.columns:
+        out["gap_valor"] = out["gap_valor"].map(fmt_brl_full)
+    if "atingimento_pct" in out.columns:
+        out["atingimento_pct"] = out["atingimento_pct"].map(fmt_pct)
+    return out
+
+
+def filter_targets_company_scope(df: pd.DataFrame, selected_company: str) -> pd.DataFrame:
+    if df.empty or selected_company == "TODOS":
+        return df
+    company = str(selected_company).strip().upper()
+    if not company:
+        return df
+    if "empresa" in df.columns:
+        series = df["empresa"].fillna("").astype(str).str.strip().str.upper()
+        return df[series.eq(company)]
+
+    vendor_ids: set[str] = set()
+    vendor_names: set[str] = set()
+    vendor_links = load_vendor_links()
+    if not vendor_links.empty and {"vendedor_id", "empresa"}.issubset(vendor_links.columns):
+        links_company = vendor_links[vendor_links["empresa"].astype(str).str.upper() == company].copy()
+        link_ids = links_company["vendedor_id"].dropna().astype(str).str.strip().tolist()
+        vendor_ids.update([v for v in link_ids if v])
+        for column in ["nome_meta", "nome_exibicao"]:
+            if column in links_company.columns:
+                names = links_company[column].dropna().astype(str).str.strip().tolist()
+                vendor_names.update([_vendor_key(v) for v in names if str(v).strip()])
+
+    vendor_map = load_bling_vendor_map()
+    if not vendor_map.empty and {"vendedor_id", "empresa"}.issubset(vendor_map.columns):
+        map_company = vendor_map[vendor_map["empresa"].astype(str).str.upper() == company].copy()
+        map_ids = map_company["vendedor_id"].dropna().astype(str).str.strip().tolist()
+        vendor_ids.update([v for v in map_ids if v])
+        if "vendedor" in map_company.columns:
+            names = map_company["vendedor"].dropna().astype(str).str.strip().tolist()
+            vendor_names.update([_vendor_key(v) for v in names if str(v).strip()])
+
+    if not vendor_ids and not vendor_names:
+        return df.iloc[0:0].copy()
+
+    out = df.copy()
+    if "sales_rep_code" in out.columns:
+        series = out["sales_rep_code"].fillna("").astype(str).str.strip()
+        return out[series.isin(vendor_ids) | series.map(_vendor_key).isin(vendor_names)]
+    if "vendedor_id" in out.columns:
+        series = out["vendedor_id"].fillna("").astype(str).str.strip()
+        return out[series.isin(vendor_ids) | series.map(_vendor_key).isin(vendor_names)]
+    return out
+
+
+def filter_local_targets_scope(
+    df: pd.DataFrame,
+    selected_company: str,
+    selected_vendor: str,
+    selected_vendor_candidates: set[str],
+) -> pd.DataFrame:
+    out = filter_targets_company_scope(df, selected_company)
+    if selected_vendor != "TODOS" and not out.empty and "vendedor_id" in out.columns:
+        out = out[
+            out["vendedor_id"].fillna("").astype(str).str.strip().map(_vendor_key).isin(selected_vendor_candidates)
+        ]
+    return out
+
+
+def build_local_targets_summary(df: pd.DataFrame, period_type: str) -> dict:
+    empty_series = pd.DataFrame(columns=["meta_valor", "realizado_valor"])
+    if df.empty:
+        return {
+            "kpis": {"meta": 0.0, "realizado": 0.0, "atingimento_pct": 0.0, "delta": 0.0},
+            "series": empty_series,
+            "uf": pd.DataFrame(columns=["estado", "meta_valor", "realizado_valor"]),
+            "vendedor": pd.DataFrame(columns=["vendedor_id", "meta_valor", "realizado_valor"]),
+        }
+    out = df.copy()
+    out["meta_valor"] = pd.to_numeric(out["meta_valor"], errors="coerce").fillna(0)
+    out["realizado_valor"] = pd.to_numeric(out["realizado_valor"], errors="coerce").fillna(0)
+    if "quarter" not in out.columns or out["quarter"].isna().all():
+        out["quarter"] = out["mes"].apply(lambda m: ((int(m) - 1) // 3 + 1) if pd.notna(m) else None)
+    if str(period_type).upper() == "QUARTER":
+        series = out.groupby(["quarter"], dropna=False)[["meta_valor", "realizado_valor"]].sum().reset_index()
+    else:
+        series = out.groupby(["mes"], dropna=False)[["meta_valor", "realizado_valor"]].sum().reset_index()
+    uf = out.groupby("estado", dropna=False)[["meta_valor", "realizado_valor"]].sum().reset_index()
+    vendedor_cols = ["vendedor_id"] + (["vendedor"] if "vendedor" in out.columns else [])
+    vendedor = out.groupby(vendedor_cols, dropna=False)[["meta_valor", "realizado_valor"]].sum().reset_index()
+    meta_total = float(out["meta_valor"].sum())
+    realizado_total = float(out["realizado_valor"].sum())
+    return {
+        "kpis": {
+            "meta": meta_total,
+            "realizado": realizado_total,
+            "atingimento_pct": (realizado_total / meta_total * 100) if meta_total else 0.0,
+            "delta": realizado_total - meta_total,
+        },
+        "series": series,
+        "uf": uf,
+        "vendedor": vendedor,
+    }
+
+
+def render_targets_executive_rankings(
+    vendedor_df: pd.DataFrame,
+    uf_df: pd.DataFrame,
+    vendedor_name_col: str,
+    vendedor_id_col: str,
+) -> None:
+    rank_left, rank_right = st.columns(2)
+
+    with rank_left:
+        if not vendedor_df.empty:
+            vendor_rank = vendedor_df.copy()
+            vendor_rank["meta_valor"] = pd.to_numeric(vendor_rank["meta_valor"], errors="coerce").fillna(0)
+            vendor_rank["realizado_valor"] = pd.to_numeric(vendor_rank["realizado_valor"], errors="coerce").fillna(0)
+            if "gap_valor" not in vendor_rank.columns:
+                vendor_rank["gap_valor"] = vendor_rank["realizado_valor"] - vendor_rank["meta_valor"]
+            if "atingimento_pct" not in vendor_rank.columns:
+                vendor_rank["atingimento_pct"] = vendor_rank.apply(
+                    lambda row: (row["realizado_valor"] / row["meta_valor"] * 100) if row["meta_valor"] else 0.0,
+                    axis=1,
+                )
+            if vendedor_name_col in vendor_rank.columns:
+                vendor_rank["vendedor_label"] = vendor_rank[vendedor_name_col].fillna("").astype(str).str.strip()
+            else:
+                vendor_rank["vendedor_label"] = ""
+            if vendedor_id_col in vendor_rank.columns:
+                fallback_ids = vendor_rank[vendedor_id_col].fillna("").astype(str).str.strip()
+                vendor_rank["vendedor_label"] = vendor_rank["vendedor_label"].mask(
+                    vendor_rank["vendedor_label"].eq(""),
+                    fallback_ids,
+                )
+            vendor_rank["vendedor_label"] = vendor_rank["vendedor_label"].replace("", "SEM_VENDEDOR")
+
+            top_gap = vendor_rank.sort_values("gap_valor").head(10).copy()
+            top_gap["meta_valor"] = top_gap["meta_valor"].map(fmt_brl_full)
+            top_gap["realizado_valor"] = top_gap["realizado_valor"].map(fmt_brl_full)
+            top_gap["gap_valor"] = top_gap["gap_valor"].map(fmt_brl_full)
+            top_gap["atingimento_pct"] = top_gap["atingimento_pct"].map(fmt_pct)
+            st.markdown("#### Maiores Gaps")
+            st.dataframe(
+                top_gap[["vendedor_label", "meta_valor", "realizado_valor", "gap_valor", "atingimento_pct"]],
+                hide_index=True,
+                width="stretch",
+            )
+
+    with rank_right:
+        if not vendedor_df.empty:
+            vendor_att = vendedor_df.copy()
+            vendor_att["meta_valor"] = pd.to_numeric(vendor_att["meta_valor"], errors="coerce").fillna(0)
+            vendor_att["realizado_valor"] = pd.to_numeric(vendor_att["realizado_valor"], errors="coerce").fillna(0)
+            vendor_att["atingimento_pct"] = vendor_att.apply(
+                lambda row: (row["realizado_valor"] / row["meta_valor"] * 100) if row["meta_valor"] else 0.0,
+                axis=1,
+            )
+            if vendedor_name_col in vendor_att.columns:
+                vendor_att["vendedor_label"] = vendor_att[vendedor_name_col].fillna("").astype(str).str.strip()
+            else:
+                vendor_att["vendedor_label"] = ""
+            if vendedor_id_col in vendor_att.columns:
+                fallback_ids = vendor_att[vendedor_id_col].fillna("").astype(str).str.strip()
+                vendor_att["vendedor_label"] = vendor_att["vendedor_label"].mask(
+                    vendor_att["vendedor_label"].eq(""),
+                    fallback_ids,
+                )
+            vendor_att["vendedor_label"] = vendor_att["vendedor_label"].replace("", "SEM_VENDEDOR")
+
+            low_att = vendor_att.sort_values(["atingimento_pct", "meta_valor"], ascending=[True, False]).head(10).copy()
+            low_att["meta_valor"] = low_att["meta_valor"].map(fmt_brl_full)
+            low_att["realizado_valor"] = low_att["realizado_valor"].map(fmt_brl_full)
+            low_att["atingimento_pct"] = low_att["atingimento_pct"].map(fmt_pct)
+            st.markdown("#### Menor Atingimento")
+            st.dataframe(
+                low_att[["vendedor_label", "meta_valor", "realizado_valor", "atingimento_pct"]],
+                hide_index=True,
+                width="stretch",
+            )
+
+    if not uf_df.empty:
+        uf_exec = uf_df.copy()
+        uf_exec["meta_valor"] = pd.to_numeric(uf_exec["meta_valor"], errors="coerce").fillna(0)
+        uf_exec["realizado_valor"] = pd.to_numeric(uf_exec["realizado_valor"], errors="coerce").fillna(0)
+        uf_exec["atingimento_pct"] = uf_exec.apply(
+            lambda row: (row["realizado_valor"] / row["meta_valor"] * 100) if row["meta_valor"] else 0.0,
+            axis=1,
+        )
+        uf_exec["gap_valor"] = uf_exec["realizado_valor"] - uf_exec["meta_valor"]
+        uf_exec = uf_exec.sort_values(["gap_valor", "atingimento_pct"], ascending=[True, True]).copy()
+        uf_exec["meta_valor"] = uf_exec["meta_valor"].map(fmt_brl_full)
+        uf_exec["realizado_valor"] = uf_exec["realizado_valor"].map(fmt_brl_full)
+        uf_exec["gap_valor"] = uf_exec["gap_valor"].map(fmt_brl_full)
+        uf_exec["atingimento_pct"] = uf_exec["atingimento_pct"].map(fmt_pct)
+        st.markdown("#### Ranking por UF")
+        st.dataframe(
+            uf_exec[["estado", "meta_valor", "realizado_valor", "gap_valor", "atingimento_pct"]],
+            hide_index=True,
+            width="stretch",
+        )
+
+
 def numeric_column(df: pd.DataFrame, column: str) -> pd.Series:
     if column not in df.columns:
         return pd.Series(0.0, index=df.index, dtype=float)
     return pd.to_numeric(df[column], errors="coerce").fillna(0)
+
+
+def build_historical_sales_comparison(
+    df: pd.DataFrame,
+    target_year: int,
+    selected_month: int | None,
+    effective_ytd: bool,
+    selected_quarter: int | None,
+) -> tuple[pd.DataFrame, pd.DataFrame, str]:
+    if df.empty or not {"data", "receita"}.issubset(df.columns):
+        return pd.DataFrame(), pd.DataFrame(), ""
+
+    out = df.copy()
+    out["data"] = pd.to_datetime(out["data"], errors="coerce")
+    out["receita"] = pd.to_numeric(out["receita"], errors="coerce").fillna(0)
+    out = out[out["data"].notna()].copy()
+    if out.empty:
+        return pd.DataFrame(), pd.DataFrame(), ""
+
+    out["ano"] = out["data"].dt.year
+    out["mes"] = out["data"].dt.month
+    available_years = sorted(int(year_item) for year_item in out["ano"].dropna().astype(int).unique().tolist())
+    if not available_years:
+        return pd.DataFrame(), pd.DataFrame(), ""
+
+    if selected_quarter is not None:
+        q_start = (selected_quarter - 1) * 3 + 1
+        q_end = q_start + 2
+        period_df = out[out["mes"].between(q_start, q_end)].copy()
+        period_label_txt = f"Q{selected_quarter}"
+        period_months = list(range(q_start, q_end + 1))
+    elif selected_month is not None and not effective_ytd:
+        period_df = out[out["mes"] == int(selected_month)].copy()
+        period_label_txt = pd.Timestamp(year=target_year, month=int(selected_month), day=1).strftime("%b").upper()
+        period_months = [int(selected_month)]
+    elif effective_ytd:
+        ref_month = pd.Timestamp.today().month
+        period_df = out[out["mes"] <= ref_month].copy()
+        period_label_txt = f"YTD ate mes {ref_month:02d}"
+        period_months = list(range(1, ref_month + 1))
+    else:
+        period_df = out.copy()
+        period_label_txt = "Ano completo"
+        period_months = list(range(1, 13))
+
+    yearly = (
+        period_df.groupby("ano", dropna=False)["receita"]
+        .sum()
+        .reset_index()
+        .sort_values("ano")
+    )
+    if yearly.empty:
+        return pd.DataFrame(), pd.DataFrame(), period_label_txt
+
+    yearly["receita_anterior"] = yearly["receita"].shift(1)
+    yearly["variacao_abs"] = yearly["receita"] - yearly["receita_anterior"]
+    yearly["variacao_pct"] = (
+        yearly["variacao_abs"] / yearly["receita_anterior"].replace(0, pd.NA) * 100
+    ).fillna(0)
+
+    monthly = (
+        out[out["mes"].isin(period_months)]
+        .groupby(["ano", "mes"], dropna=False)["receita"]
+        .sum()
+        .reset_index()
+        .sort_values(["ano", "mes"])
+    )
+    if not monthly.empty:
+        monthly["mes_label"] = monthly["mes"].apply(
+            lambda month_item: pd.Timestamp(year=2000, month=int(month_item), day=1).strftime("%b").upper()
+        )
+        monthly["ano"] = monthly["ano"].astype(int)
+
+    return yearly, monthly, period_label_txt
+
+
+def comparison_period_months(
+    target_year: int,
+    selected_month: int | None,
+    effective_ytd: bool,
+    selected_quarter: int | None,
+) -> tuple[list[int], str]:
+    if selected_quarter is not None:
+        q_start = (selected_quarter - 1) * 3 + 1
+        q_end = q_start + 2
+        return list(range(q_start, q_end + 1)), f"Q{selected_quarter}"
+    if selected_month is not None and not effective_ytd:
+        month_label = pd.Timestamp(year=target_year, month=int(selected_month), day=1).strftime("%b").upper()
+        return [int(selected_month)], month_label
+    if effective_ytd:
+        ref_month = pd.Timestamp.today().month if int(target_year) == pd.Timestamp.today().year else 12
+        return list(range(1, ref_month + 1)), f"YTD ate mes {ref_month:02d}"
+    return list(range(1, 13)), "Ano completo"
+
+
+def prepare_sales_comparison_actual(
+    selected_years: list[int],
+    target_year: int,
+    selected_company: str,
+    selected_vendor: str,
+    selected_customer: str,
+    selected_vendor_candidates: set[str],
+    selected_scope: str,
+    selected_month: int | None,
+    effective_ytd: bool,
+    selected_quarter: int | None,
+) -> tuple[pd.DataFrame, str]:
+    selected_years = sorted({int(item) for item in selected_years})
+    period_months, period_label_txt = comparison_period_months(
+        target_year,
+        selected_month,
+        effective_ytd,
+        selected_quarter,
+    )
+    frames: list[pd.DataFrame] = []
+
+    actual = sheets.get("realizado", pd.DataFrame()).copy()
+    if selected_customer == "TODOS" and not actual.empty and {"data", "receita"}.issubset(actual.columns):
+        actual["data"] = pd.to_datetime(actual["data"], errors="coerce")
+        actual["receita"] = pd.to_numeric(actual["receita"], errors="coerce").fillna(0)
+        actual = actual[actual["data"].notna()].copy()
+        if not actual.empty:
+            actual["ano"] = actual["data"].dt.year.astype(int)
+            actual["mes"] = actual["data"].dt.month.astype(int)
+            actual = actual[actual["ano"].isin(selected_years) & actual["mes"].isin(period_months)].copy()
+            if not actual.empty:
+                frames.append(actual[["data", "receita", "ano", "mes"]].copy())
+
+    missing_years = sorted(set(selected_years) - set(frames[0]["ano"].unique().tolist()) if frames else set(selected_years))
+    if missing_years:
+        detail = load_bling_sales_detail(0)
+        if not detail.empty and {"data", "valor_total"}.issubset(detail.columns):
+            hist = detail.copy()
+            hist["data"] = pd.to_datetime(hist["data"], errors="coerce")
+            hist["receita"] = pd.to_numeric(hist["valor_total"], errors="coerce").fillna(0)
+            hist = hist[hist["data"].notna()].copy()
+            if selected_company != "TODOS":
+                hist = filter_company_scope(hist, selected_company)
+            if selected_vendor != "TODOS":
+                hist = filter_vendor_scope(hist, selected_vendor, ["vendedor", "vendedor_id"], selected_vendor_candidates)
+            if selected_customer != "TODOS":
+                hist = filter_customer_scope(hist, selected_customer)
+            if not hist.empty:
+                hist = filter_sales_nature_scope(hist, selected_scope)
+                hist["ano"] = hist["data"].dt.year.astype(int)
+                hist["mes"] = hist["data"].dt.month.astype(int)
+                hist = hist[hist["ano"].isin(missing_years) & hist["mes"].isin(period_months)].copy()
+                if not hist.empty:
+                    group_cols = ["pedido_id", "data", "ano", "mes"]
+                    if "empresa" in hist.columns:
+                        group_cols.append("empresa")
+                    hist = hist.groupby(group_cols, dropna=False)["receita"].max().reset_index()
+                    frames.append(hist[["data", "receita", "ano", "mes"]].copy())
+
+    if not frames:
+        return pd.DataFrame(), period_label_txt
+
+    out = pd.concat(frames, ignore_index=True)
+    out = out[out["ano"].isin(selected_years) & out["mes"].isin(period_months)].copy()
+    if out.empty:
+        return pd.DataFrame(), period_label_txt
+
+    out["mes_label"] = out["mes"].apply(
+        lambda month_item: pd.Timestamp(year=2000, month=int(month_item), day=1).strftime("%b").upper()
+    )
+    out["ano_label"] = out["ano"].astype(str)
+    return out, period_label_txt
+
+
+def prepare_sales_comparison_detail(
+    selected_years: list[int],
+    target_year: int,
+    selected_company: str,
+    selected_vendor: str,
+    selected_customer: str,
+    selected_vendor_candidates: set[str],
+    selected_scope: str,
+    selected_month: int | None,
+    effective_ytd: bool,
+    selected_quarter: int | None,
+) -> tuple[pd.DataFrame, str]:
+    detail = load_bling_sales_detail(0)
+    if detail.empty:
+        return pd.DataFrame(), ""
+
+    out = detail.copy()
+    out["data"] = pd.to_datetime(out["data"], errors="coerce")
+    out["valor_total"] = pd.to_numeric(out["valor_total"], errors="coerce").fillna(0)
+    out["quantidade"] = pd.to_numeric(out["quantidade"], errors="coerce").fillna(0)
+    out = out[out["data"].notna()].copy()
+    if out.empty:
+        return pd.DataFrame(), ""
+
+    if selected_company != "TODOS":
+        out = filter_company_scope(out, selected_company)
+    if selected_vendor != "TODOS":
+        out = filter_vendor_scope(out, selected_vendor, ["vendedor", "vendedor_id"], selected_vendor_candidates)
+    if selected_customer != "TODOS":
+        out = filter_customer_scope(out, selected_customer)
+
+    if out.empty:
+        return pd.DataFrame(), ""
+    out["receita"] = out["valor_total"]
+    out = filter_sales_nature_scope(out, selected_scope)
+    out = out.drop(columns=["receita"], errors="ignore")
+    if out.empty:
+        return pd.DataFrame(), ""
+
+    out["ano"] = out["data"].dt.year.astype(int)
+    selected_years = sorted({int(item) for item in selected_years})
+    out = out[out["ano"].isin(selected_years)].copy()
+    if out.empty:
+        return pd.DataFrame(), ""
+
+    period_months, period_label_txt = comparison_period_months(
+        target_year,
+        selected_month,
+        effective_ytd,
+        selected_quarter,
+    )
+    out["mes"] = out["data"].dt.month.astype(int)
+    out = out[out["mes"].isin(period_months)].copy()
+    if out.empty:
+        return pd.DataFrame(), period_label_txt
+
+    out["mes_label"] = out["mes"].apply(
+        lambda month_item: pd.Timestamp(year=2000, month=int(month_item), day=1).strftime("%b").upper()
+    )
+    out["produto"] = out["produto"].fillna("N/D").astype(str).str.strip().str.upper().replace("", "N/D")
+    out["tipo_produto"] = out["tipo_produto"].fillna("N/D").astype(str).str.strip().replace("", "N/D")
+    out["cliente"] = out["cliente"].fillna("SEM_CLIENTE").astype(str).str.strip().str.upper().replace("", "SEM_CLIENTE")
+    out["empresa"] = out["empresa"].fillna("").astype(str).str.upper()
+    out["ano_label"] = out["ano"].astype(str)
+    return out, period_label_txt
 
 
 def sort_by_available(df: pd.DataFrame, specs: list[tuple[str, bool]]) -> pd.DataFrame:
@@ -882,6 +1357,7 @@ for key in ["metas", "realizado", "oportunidades"]:
 page_options = [
     "Executive Cockpit",
     "Lab Comercial",
+    "Comparativo de Vendas",
     "Finance Control Tower",
     "Pipeline Manager",
     "Performance & Ritmo",
@@ -1026,8 +1502,6 @@ if PUBLIC_REVIEW:
     st.info("Modo revisao publica ativo: acesso sem login, somente visualizacao e paginas CRM.")
     st.caption(f"Build: {APP_BUILD}")
 period = period_label(year, selected_month, effective_ytd, selected_quarter)
-st.caption(f"Periodo: {period}")
-st.caption(f"Filtros: Empresa={sel_company} | Movimento={sales_scope}")
 
 if PUBLIC_REVIEW and page == "Metas Comerciais":
     st.warning("Pagina indisponivel no modo de revisao publica.")
@@ -1113,19 +1587,78 @@ if page == "Executive Cockpit":
 
     gap_display = meta_display - kpis.realizado
     ating_display = (kpis.realizado / meta_display * 100) if meta_display else 0.0
+    run_rate_display = 0.0
+    need_per_business_day = 0.0
+    business_days_elapsed = 0
+    business_days_total = 0
+    business_days_remaining = 0
 
-    c1, c2, c3, c4, c5, c6 = st.columns(6)
-    c1.metric("Realizado", fmt_brl_abbrev(kpis.realizado))
-    c2.metric("Meta", fmt_brl_abbrev(meta_display) if sales_scope == "Vendas efetivas" else "-")
-    c3.metric("Atingimento %", fmt_pct(ating_display) if sales_scope == "Vendas efetivas" else "-")
-    c4.metric("Gap (R$)", fmt_brl_abbrev(gap_display) if sales_scope == "Vendas efetivas" else "-")
-    c5.metric("Pipeline Ponderado", fmt_brl_abbrev(kpis.pipeline_ponderado) if kpis.pipeline_ponderado is not None else "-")
-    c6.metric("% c/ Proximo Passo", fmt_pct(kpis.pct_proximo_passo) if kpis.pct_proximo_passo is not None else "-")
+    if sales_scope == "Vendas efetivas" and meta_display > 0:
+        if selected_month is not None and not effective_ytd and selected_quarter is None:
+            period_start = pd.Timestamp(year=year, month=int(selected_month), day=1)
+            period_end = period_start + pd.offsets.MonthEnd(0)
+            if period_start.year == pd.Timestamp.today().year and period_start.month == pd.Timestamp.today().month:
+                ref_end = min(pd.Timestamp.today().normalize(), period_end)
+            else:
+                ref_end = period_end
+        elif selected_quarter is not None:
+            q_start_month = (selected_quarter - 1) * 3 + 1
+            period_start = pd.Timestamp(year=year, month=q_start_month, day=1)
+            period_end = pd.Timestamp(year=year, month=q_start_month + 2, day=1) + pd.offsets.MonthEnd(0)
+            if year == pd.Timestamp.today().year and pd.Timestamp.today().month <= q_start_month + 2:
+                ref_end = min(pd.Timestamp.today().normalize(), period_end)
+            else:
+                ref_end = period_end
+        else:
+            period_start = pd.Timestamp(year=year, month=1, day=1)
+            period_end = pd.Timestamp(year=year, month=12, day=31)
+            if year == pd.Timestamp.today().year:
+                ref_end = min(pd.Timestamp.today().normalize(), period_end)
+            else:
+                ref_end = period_end
+
+        if ref_end >= period_start:
+            business_days_elapsed = len(pd.bdate_range(period_start, ref_end))
+            business_days_total = len(pd.bdate_range(period_start, period_end))
+            business_days_remaining = max(business_days_total - business_days_elapsed, 0)
+            run_rate_display = (kpis.realizado / business_days_elapsed) if business_days_elapsed else 0.0
+            need_per_business_day = (max(meta_display - kpis.realizado, 0.0) / business_days_remaining) if business_days_remaining else 0.0
+
+    k1, k2, k3, k4 = st.columns(4)
+    with k1:
+        st.markdown('<div class="crm-kpi-row">', unsafe_allow_html=True)
+        st.metric("Realizado", fmt_brl_abbrev(kpis.realizado))
+        st.markdown("</div>", unsafe_allow_html=True)
+    with k2:
+        st.markdown('<div class="crm-kpi-row">', unsafe_allow_html=True)
+        st.metric("Meta", fmt_brl_abbrev(meta_display) if sales_scope == "Vendas efetivas" else "-")
+        st.markdown("</div>", unsafe_allow_html=True)
+    with k3:
+        st.markdown('<div class="crm-kpi-row">', unsafe_allow_html=True)
+        st.metric("Atingimento %", fmt_pct(ating_display) if sales_scope == "Vendas efetivas" else "-")
+        st.markdown("</div>", unsafe_allow_html=True)
+    with k4:
+        st.markdown('<div class="crm-kpi-row">', unsafe_allow_html=True)
+        st.metric("Run-rate", fmt_brl_abbrev(run_rate_display) if sales_scope == "Vendas efetivas" else "-")
+        st.markdown("</div>", unsafe_allow_html=True)
 
     series = meta_realizado_mensal(sheets, year)
     if not series.empty:
+        series = series.copy()
+        if "data" in series.columns:
+            series["data"] = pd.to_datetime(series["data"], errors="coerce")
+            series = series[series["data"].notna()]
+            if selected_quarter is not None:
+                q_start = (selected_quarter - 1) * 3 + 1
+                q_end = q_start + 2
+                series = series[series["data"].dt.month.between(q_start, q_end)]
+            elif effective_ytd and year == pd.Timestamp.today().year:
+                series = series[series["data"].dt.month <= pd.Timestamp.today().month]
+            elif selected_month is not None and not effective_ytd:
+                series = series[series["data"].dt.month == selected_month]
+    if not series.empty:
         st.subheader("Meta vs Realizado")
-        if selected_month is None or effective_ytd:
+        if selected_month is None or effective_ytd or selected_quarter is not None:
             st.altair_chart(bar_meta_realizado(series), width="stretch")
         else:
             single = series[series["data"].dt.month == selected_month].copy()
@@ -1513,6 +2046,358 @@ if page == "Lab Comercial":
                 f"Comparativo laboratorio: Meta {fmt_brl_abbrev(meta_total_lab)} | Realizado {fmt_brl_abbrev(realizado_total_lab)} | Atingimento {fmt_pct(ating_lab)}"
             )
 
+# Page A3 - Comparativo de Vendas
+if page == "Comparativo de Vendas":
+    st.subheader("Comparativo de Vendas")
+    st.caption("Analitico comparativo de vendas entre anos, com cortes por mes, produto e cliente.")
+
+    detail_all = load_bling_sales_detail(0)
+    if detail_all.empty or "data" not in detail_all.columns:
+        st.info("Sem base detalhada de vendas para montar o comparativo.")
+    else:
+        detail_all = detail_all.copy()
+        detail_all["data"] = pd.to_datetime(detail_all["data"], errors="coerce")
+        detail_all = detail_all[detail_all["data"].notna()].copy()
+        available_years = sorted(detail_all["data"].dt.year.dropna().astype(int).unique().tolist())
+        default_years = [int(year)]
+        if int(year) - 1 in available_years:
+            default_years = [int(year) - 1, int(year)]
+        compare_years = st.multiselect(
+            "Anos para comparar",
+            options=available_years,
+            default=[item for item in default_years if item in available_years],
+            key="compare_sales_years",
+        )
+        customer_scope = detail_all.copy()
+        if sel_company != "TODOS":
+            customer_scope = filter_company_scope(customer_scope, sel_company)
+        if sel_vendor != "TODOS":
+            customer_scope = filter_vendor_scope(
+                customer_scope,
+                sel_vendor,
+                ["vendedor", "vendedor_id"],
+                selected_vendor_candidates,
+            )
+        customer_scope = filter_sales_nature_scope(customer_scope, sales_scope)
+        if compare_years:
+            customer_scope = customer_scope[customer_scope["data"].dt.year.isin(compare_years)].copy()
+        customer_options = ["TODOS"]
+        if "cliente" in customer_scope.columns and not customer_scope.empty:
+            customer_values = (
+                customer_scope["cliente"].fillna("").astype(str).str.strip().str.upper().replace("", pd.NA).dropna().drop_duplicates()
+            )
+            customer_options.extend(sorted(customer_values.tolist()))
+        selected_customer = st.selectbox(
+            "Cliente",
+            options=customer_options,
+            index=0,
+            key="compare_sales_customer",
+        )
+        view_mode = st.radio(
+            "Visao analitica",
+            ["Mensal", "Produto", "Cliente"],
+            horizontal=True,
+            key="compare_sales_mode",
+        )
+        top_n = st.slider("Top produtos/clientes", min_value=5, max_value=30, value=10, step=1, key="compare_sales_top_n")
+
+        if len(compare_years) < 2:
+            st.info("Selecione pelo menos 2 anos para comparar.")
+        else:
+            actual_compare, comp_period_label = prepare_sales_comparison_actual(
+                compare_years,
+                year,
+                sel_company,
+                sel_vendor,
+                selected_customer,
+                selected_vendor_candidates,
+                sales_scope,
+                selected_month,
+                effective_ytd,
+                selected_quarter,
+            )
+            comp_detail, _ = prepare_sales_comparison_detail(
+                compare_years,
+                year,
+                sel_company,
+                sel_vendor,
+                selected_customer,
+                selected_vendor_candidates,
+                sales_scope,
+                selected_month,
+                effective_ytd,
+                selected_quarter,
+            )
+
+            if actual_compare.empty:
+                st.info("Sem realizado para os filtros atuais nessa combinacao de anos.")
+            else:
+                compare_years_sorted = sorted(compare_years)
+                recorte_text = (
+                    f"Empresa={sel_company} | Vendedor={display_vendor_map.get(sel_vendor, sel_vendor)} | "
+                    f"Cliente={selected_customer} | Movimento={sales_scope} | Periodo={comp_period_label or '-'} | "
+                    f"Anos={', '.join(str(item) for item in compare_years_sorted)}"
+                )
+                st.caption(recorte_text)
+
+                yearly_totals = (
+                    actual_compare.groupby("ano", dropna=False)["receita"]
+                    .sum()
+                    .reset_index()
+                    .sort_values("ano")
+                )
+                yearly_totals["valor_anterior"] = yearly_totals["receita"].shift(1)
+                yearly_totals["delta"] = yearly_totals["receita"] - yearly_totals["valor_anterior"]
+                yearly_totals["delta_pct"] = (
+                    yearly_totals["delta"] / yearly_totals["valor_anterior"].replace(0, pd.NA) * 100
+                ).fillna(0)
+
+                current_compare_year = max(compare_years)
+                current_total = float(
+                    yearly_totals.loc[yearly_totals["ano"] == current_compare_year, "receita"].sum()
+                )
+                previous_compare = yearly_totals[yearly_totals["ano"] < current_compare_year].tail(1)
+                previous_total = float(previous_compare["receita"].iloc[0]) if not previous_compare.empty else 0.0
+                current_delta = current_total - previous_total
+                current_delta_pct = (current_delta / previous_total * 100) if previous_total else 0.0
+
+                c1, c2, c3, c4 = st.columns(4)
+                c1.metric("Periodo analisado", comp_period_label or "-")
+                c2.metric(f"Vendas {current_compare_year}", fmt_brl_abbrev(current_total))
+                c3.metric(
+                    f"Vs {int(previous_compare['ano'].iloc[0])}" if not previous_compare.empty else "Vs ano anterior",
+                    fmt_brl_abbrev(current_delta),
+                )
+                c4.metric("Variacao %", fmt_pct(current_delta_pct))
+
+                overview = yearly_totals.copy()
+                overview["ano"] = overview["ano"].astype(str)
+                overview_chart = (
+                    alt.Chart(overview)
+                    .mark_bar(cornerRadiusTopLeft=8, cornerRadiusTopRight=8)
+                    .encode(
+                        x=alt.X("ano:N", title="Ano"),
+                        y=alt.Y("receita:Q", title="Vendas reais"),
+                        color=alt.Color(
+                            "ano:N",
+                            title="Ano",
+                            scale=alt.Scale(range=["#1f264d", "#00b6b9", "#5fbd65", "#e07a1f", "#8c5fbf"]),
+                        ),
+                        tooltip=[
+                            "ano:N",
+                            alt.Tooltip("receita:Q", format=",.2f", title="Vendas reais"),
+                            alt.Tooltip("delta:Q", format=",.2f", title="Delta"),
+                            alt.Tooltip("delta_pct:Q", format=",.2f", title="Variacao %"),
+                        ],
+                    )
+                    .properties(height=250)
+                )
+                st.altair_chart(overview_chart, width="stretch")
+
+                if view_mode == "Mensal":
+                    monthly = (
+                        actual_compare.groupby(["ano_label", "mes", "mes_label"], dropna=False)["receita"]
+                        .sum()
+                        .reset_index()
+                        .sort_values(["ano_label", "mes"])
+                    )
+                    month_sort = monthly.sort_values("mes")["mes_label"].drop_duplicates().tolist()
+                    monthly_chart = (
+                        alt.Chart(monthly)
+                        .mark_bar(cornerRadiusTopLeft=4, cornerRadiusTopRight=4)
+                        .encode(
+                            x=alt.X(
+                                "mes_label:N",
+                                title="Mes",
+                                sort=month_sort,
+                                axis=alt.Axis(labelAngle=0),
+                            ),
+                            y=alt.Y("receita:Q", title="Vendas reais"),
+                            color=alt.Color(
+                                "ano_label:N",
+                                title="Ano",
+                                scale=alt.Scale(range=["#1f264d", "#00b6b9", "#5fbd65", "#e07a1f", "#8c5fbf"]),
+                            ),
+                            xOffset="ano_label:N",
+                            tooltip=[
+                                "ano_label:N",
+                                "mes_label:N",
+                                alt.Tooltip("receita:Q", format=",.2f", title="Vendas reais"),
+                            ],
+                        )
+                        .properties(height=360)
+                    )
+                    st.markdown("#### Comparativo mensal entre anos")
+                    st.altair_chart(monthly_chart, width="stretch")
+
+                    monthly_pivot = (
+                        monthly.pivot_table(index="mes_label", columns="ano_label", values="receita", aggfunc="sum", fill_value=0)
+                        .reset_index()
+                    )
+                    monthly_pivot = monthly_pivot.rename(columns={"mes_label": "Mes"})
+                    monthly_pivot["__ord"] = pd.Categorical(monthly_pivot["Mes"], categories=month_sort, ordered=True)
+                    monthly_pivot = monthly_pivot.sort_values("__ord").drop(columns=["__ord"])
+                    value_cols = [column for column in monthly_pivot.columns if column != "Mes"]
+                    if len(value_cols) >= 2:
+                        latest_col = value_cols[-1]
+                        previous_col = value_cols[-2]
+                        monthly_pivot["Delta"] = monthly_pivot[latest_col] - monthly_pivot[previous_col]
+                        monthly_pivot["Variacao %"] = (
+                            monthly_pivot["Delta"] / monthly_pivot[previous_col].replace(0, pd.NA) * 100
+                        ).fillna(0)
+                    for column in monthly_pivot.columns:
+                        if column not in {"Mes", "Variacao %"}:
+                            monthly_pivot[column] = monthly_pivot[column].map(fmt_brl_full)
+                    if "Variacao %" in monthly_pivot.columns:
+                        monthly_pivot["Variacao %"] = monthly_pivot["Variacao %"].map(fmt_pct)
+                    st.dataframe(monthly_pivot, hide_index=True, width="stretch")
+
+                    export_monthly = monthly.copy().rename(
+                        columns={"ano_label": "Ano", "mes_label": "Mes", "receita": "Vendas"}
+                    )
+                    out_xlsx = BytesIO()
+                    with pd.ExcelWriter(out_xlsx, engine="openpyxl") as writer:
+                        export_monthly[["Ano", "Mes", "Vendas"]].to_excel(
+                            writer, index=False, sheet_name="comparativo_mensal"
+                        )
+                    st.download_button(
+                        "Exportar comparativo mensal",
+                        data=out_xlsx.getvalue(),
+                        file_name="comparativo_vendas_mensal.xlsx",
+                    )
+                else:
+                    if comp_detail.empty:
+                        st.info("Sem base detalhada suficiente para comparar produto ou cliente nesse recorte.")
+                    else:
+                        dimension_col = "produto" if view_mode == "Produto" else "cliente"
+                        compare_base = comp_detail.copy()
+                        value_col = "valor_total"
+                        if view_mode == "Cliente":
+                            client_group_cols = [dimension_col, "ano_label", "pedido_id"]
+                            if "empresa" in compare_base.columns:
+                                client_group_cols.append("empresa")
+                            compare_base = (
+                                compare_base.groupby(client_group_cols, dropna=False)["valor_total"]
+                                .max()
+                                .reset_index()
+                            )
+                        ranking_base = (
+                            compare_base.groupby(dimension_col, dropna=False)[value_col]
+                            .sum()
+                            .reset_index()
+                            .sort_values(value_col, ascending=False)
+                            .head(top_n)
+                        )
+                        selected_items = ranking_base[dimension_col].dropna().astype(str).tolist()
+                        detail_view = compare_base[compare_base[dimension_col].isin(selected_items)].copy()
+                        grouped = (
+                            detail_view.groupby([dimension_col, "ano_label"], dropna=False)[value_col]
+                            .sum()
+                            .reset_index()
+                        )
+                        grouped = grouped.rename(columns={dimension_col: "dimensao"})
+
+                        order_dims = (
+                            grouped.groupby("dimensao", dropna=False)[value_col]
+                            .sum()
+                            .sort_values(ascending=False)
+                            .index.tolist()
+                        )
+                        compare_chart = (
+                            alt.Chart(grouped)
+                            .mark_bar(cornerRadiusEnd=6)
+                            .encode(
+                                y=alt.Y("dimensao:N", sort=order_dims, title=view_mode),
+                                x=alt.X(f"{value_col}:Q", title="Vendas"),
+                                color=alt.Color(
+                                    "ano_label:N",
+                                    title="Ano",
+                                    scale=alt.Scale(range=["#1f264d", "#00b6b9", "#5fbd65", "#e07a1f", "#8c5fbf"]),
+                                ),
+                                xOffset="ano_label:N",
+                                tooltip=[
+                                    "dimensao:N",
+                                    "ano_label:N",
+                                    alt.Tooltip(f"{value_col}:Q", format=",.2f", title="Vendas"),
+                                ],
+                            )
+                            .properties(height=max(320, len(selected_items) * 30))
+                        )
+                        st.markdown(f"#### Comparativo por {view_mode.lower()}")
+                        st.altair_chart(compare_chart, width="stretch")
+
+                        pivot = (
+                            grouped.pivot_table(index="dimensao", columns="ano_label", values=value_col, aggfunc="sum", fill_value=0)
+                            .reset_index()
+                        )
+                        value_cols = [column for column in pivot.columns if column != "dimensao"]
+                        if value_cols:
+                            pivot["delta"] = pivot[value_cols[-1]] - pivot[value_cols[0]]
+                            base_col = value_cols[0]
+                            pivot["delta_pct"] = (
+                                pivot["delta"] / pivot[base_col].replace(0, pd.NA) * 100
+                            ).fillna(0)
+                        for column in value_cols + ["delta"]:
+                            if column in pivot.columns:
+                                pivot[column] = pivot[column].map(fmt_brl_full)
+                        if "delta_pct" in pivot.columns:
+                            pivot["delta_pct"] = pivot["delta_pct"].map(fmt_pct)
+                        pivot = pivot.rename(columns={"dimensao": view_mode})
+                        show_cols = [view_mode] + value_cols + [c for c in ["delta", "delta_pct"] if c in pivot.columns]
+                        st.dataframe(pivot[show_cols], hide_index=True, width="stretch")
+
+                        if len(compare_years_sorted) >= 2:
+                            latest_year = str(compare_years_sorted[-1])
+                            previous_year = str(compare_years_sorted[-2])
+                            comparison_wide = (
+                                grouped.pivot_table(
+                                    index="dimensao",
+                                    columns="ano_label",
+                                    values=value_col,
+                                    aggfunc="sum",
+                                    fill_value=0,
+                                )
+                                .reset_index()
+                            )
+                            if latest_year in comparison_wide.columns and previous_year in comparison_wide.columns:
+                                comparison_wide["delta"] = comparison_wide[latest_year] - comparison_wide[previous_year]
+                                comparison_wide["delta_pct"] = (
+                                    comparison_wide["delta"] / comparison_wide[previous_year].replace(0, pd.NA) * 100
+                                ).fillna(0)
+
+                                top_limit = 5 if view_mode == "Cliente" else 10
+                                altas = comparison_wide.sort_values("delta", ascending=False).head(top_limit).copy()
+                                quedas = comparison_wide.sort_values("delta", ascending=True).head(top_limit).copy()
+                                for frame in [altas, quedas]:
+                                    for col in [previous_year, latest_year]:
+                                        if col in frame.columns:
+                                            frame[col] = frame[col].map(fmt_brl_full)
+                                    frame["delta_pct"] = frame["delta_pct"].map(fmt_pct)
+                                    frame.drop(columns=["delta"], inplace=True, errors="ignore")
+
+                                st.markdown(f"#### Top Altas {view_mode.lower()}")
+                                st.dataframe(
+                                    altas.rename(columns={"dimensao": view_mode}),
+                                    hide_index=True,
+                                    width="stretch",
+                                )
+                                st.markdown(f"#### Top Quedas {view_mode.lower()}")
+                                st.dataframe(
+                                    quedas.rename(columns={"dimensao": view_mode}),
+                                    hide_index=True,
+                                    width="stretch",
+                                )
+
+                                export_rank = comparison_wide.rename(columns={"dimensao": view_mode}).copy()
+                                out_xlsx = BytesIO()
+                                with pd.ExcelWriter(out_xlsx, engine="openpyxl") as writer:
+                                    export_rank.to_excel(writer, index=False, sheet_name="comparativo_rank")
+                                st.download_button(
+                                    f"Exportar comparativo por {view_mode.lower()}",
+                                    data=out_xlsx.getvalue(),
+                                    file_name=f"comparativo_vendas_{view_mode.lower().replace(' ', '_')}.xlsx",
+                                )
+
 # Page B - Pipeline Manager
 if page == "Pipeline Manager":
     st.subheader("Pipeline Manager")
@@ -1540,13 +2425,24 @@ if page == "Pipeline Manager":
         weighted_total = float(numeric_column(df, "weighted_pipeline_value").sum())
         sem_passo = int(numeric_column(df, "opportunities_without_next_step").sum())
         overdue = int(numeric_column(df, "opportunities_with_overdue_step").sum())
+        pipeline_needed = max(float(compute_kpis(
+            sheets,
+            year,
+            selected_month,
+            effective_ytd,
+            selected_quarter,
+            pipeline_view=df,
+        ).gap), 0.0)
+        coverage_pct = (weighted_total / pipeline_needed * 100) if pipeline_needed else 0.0
 
-        c1, c2, c3, c4, c5 = st.columns(5)
+        c1, c2, c3, c4, c5, c6, c7 = st.columns(7)
         c1.metric("Oportunidades", total_opps)
         c2.metric("Pipeline", fmt_brl_abbrev(pipeline_total))
         c3.metric("Pipeline ponderado", fmt_brl_abbrev(weighted_total))
         c4.metric("Sem proximo passo", sem_passo)
         c5.metric("Passos vencidos", overdue)
+        c6.metric("Pipeline necessario", fmt_brl_abbrev(pipeline_needed))
+        c7.metric("Cobertura do gap", fmt_pct(coverage_pct) if pipeline_needed else "-")
 
         if "stage" in df.columns and not df.empty:
             stage_df = (
@@ -1555,19 +2451,68 @@ if page == "Pipeline Manager":
                 .reset_index()
                 .fillna(0)
             )
-            stage_long = stage_df.melt(id_vars=["stage"], var_name="tipo", value_name="valor")
-            chart = (
-                alt.Chart(stage_long)
-                .mark_bar()
-                .encode(
-                    x=alt.X("stage:N", title="Etapa"),
-                    y=alt.Y("valor:Q", title="Valor"),
-                    color=alt.Color("tipo:N", title="Serie"),
-                    xOffset="tipo:N",
-                    tooltip=["stage", "tipo", "valor"],
+            charts_col, aging_col = st.columns(2)
+            with charts_col:
+                stage_long = stage_df.melt(id_vars=["stage"], var_name="tipo", value_name="valor")
+                chart = (
+                    alt.Chart(stage_long)
+                    .mark_bar()
+                    .encode(
+                        x=alt.X("stage:N", title="Etapa"),
+                        y=alt.Y("valor:Q", title="Valor"),
+                        color=alt.Color("tipo:N", title="Serie"),
+                        xOffset="tipo:N",
+                        tooltip=["stage", "tipo", "valor"],
+                    )
                 )
-            )
-            st.altair_chart(chart, width="stretch")
+                st.altair_chart(chart, width="stretch")
+
+            if "last_opportunity_update" in df.columns:
+                age_df = df.copy()
+                age_df["last_opportunity_update"] = pd.to_datetime(age_df["last_opportunity_update"], errors="coerce")
+                age_df["dias_sem_update"] = (
+                    pd.Timestamp.today().normalize() - age_df["last_opportunity_update"].dt.normalize()
+                ).dt.days
+                age_df["dias_sem_update"] = pd.to_numeric(age_df["dias_sem_update"], errors="coerce").fillna(0)
+                aging_stage = (
+                    age_df.groupby("stage", dropna=False)
+                    .agg(
+                        dias_medios_sem_update=("dias_sem_update", "mean"),
+                        dias_max_sem_update=("dias_sem_update", "max"),
+                        oportunidades=("opportunities_count", "sum"),
+                    )
+                    .reset_index()
+                    .sort_values("dias_medios_sem_update", ascending=False)
+                )
+                with aging_col:
+                    aging_chart = (
+                        alt.Chart(aging_stage)
+                        .mark_bar(cornerRadiusEnd=6, color="#e07a1f")
+                        .encode(
+                            y=alt.Y("stage:N", sort="-x", title="Etapa"),
+                            x=alt.X("dias_medios_sem_update:Q", title="Dias medios sem update"),
+                            tooltip=[
+                                "stage",
+                                alt.Tooltip("dias_medios_sem_update:Q", format=",.1f", title="Dias medios"),
+                                alt.Tooltip("dias_max_sem_update:Q", format=",.0f", title="Dias max"),
+                                alt.Tooltip("oportunidades:Q", format=",.0f", title="Oportunidades"),
+                            ],
+                        )
+                    )
+                    st.altair_chart(aging_chart, width="stretch")
+
+                risk_stage = aging_stage.copy()
+                risk_stage["status"] = "OK"
+                risk_stage.loc[risk_stage["dias_medios_sem_update"] >= 14, "status"] = "ATENCAO"
+                risk_stage.loc[risk_stage["dias_medios_sem_update"] >= 30, "status"] = "RISCO"
+                risk_stage["dias_medios_sem_update"] = risk_stage["dias_medios_sem_update"].round(1)
+                risk_stage["dias_max_sem_update"] = risk_stage["dias_max_sem_update"].round(0).astype(int)
+                st.markdown("#### Etapas em risco")
+                st.dataframe(
+                    risk_stage[["stage", "oportunidades", "dias_medios_sem_update", "dias_max_sem_update", "status"]],
+                    hide_index=True,
+                    width="stretch",
+                )
 
         view_cols = [
             "sales_rep_name",
@@ -1963,7 +2908,7 @@ if page == "Auditoria":
     if "receita" in real.columns:
         real["receita"] = pd.to_numeric(real["receita"], errors="coerce")
     real = real.dropna(subset=["data"])
-    real = real[real["data"].dt.year == year]
+    real = filter_period_scope(real, year, selected_month, effective_ytd, selected_quarter)
     real_m = real.groupby(real["data"].dt.to_period("M"))["receita"].sum().reset_index()
     real_m["data"] = real_m["data"].dt.to_timestamp()
 
@@ -1977,7 +2922,7 @@ if page == "Auditoria":
     else:
         nfe = nfe.copy()
         nfe = filter_company_scope(nfe, sel_company)
-        nfe = nfe[nfe["data"].dt.year == year]
+        nfe = filter_period_scope(nfe, year, selected_month, effective_ytd, selected_quarter)
         nfe_m = nfe.groupby(nfe["data"].dt.to_period("M"))["valor"].sum().reset_index()
         nfe_m["data"] = nfe_m["data"].dt.to_timestamp()
 
@@ -2053,27 +2998,37 @@ if page == "Metas Comerciais":
     st.subheader("Metas Comerciais")
     tabs = st.tabs(["Executive Summary", "Metas", "Cadastro", "Transferencia"])
     targets_view_all = apply_acl_codes(load_sales_targets_view(), vendor_col="sales_rep_code")
+    targets_view_all = filter_targets_company_scope(targets_view_all, sel_company)
     targets_view_all = filter_vendor_scope(
         targets_view_all, sel_vendor, ["sales_rep_code", "sales_rep_name"], selected_vendor_candidates
     )
-    periodo_tipo = "MONTH"
+    periodo_tipo = "QUARTER" if selected_quarter is not None else "MONTH"
     uf = ""
-    vend = ""
     status = []
-    mes = None
-    quarter = None
+    mes = selected_month if selected_month is not None and not effective_ytd and selected_quarter is None else None
+    quarter = selected_quarter
 
     with tabs[0]:
-        st.write("Resumo executivo das metas por UF, vendedor e periodo.")
-        colf1, colf2, colf3, colf4, colf5 = st.columns(5)
-        periodo_tipo = colf1.selectbox("Periodo", ["MONTH", "QUARTER"], key="metas_periodo_tipo")
+        st.write("Resumo executivo das metas no recorte atual do sidebar.")
+        st.caption(f"Periodo={period} | Vendedor={display_vendor_map.get(sel_vendor, sel_vendor)} | Empresa={sel_company}")
+        colf1, colf2, colf3 = st.columns([2, 2, 1])
 
         if not targets_view_all.empty:
-            all_targets_year = filter_targets_view(targets_view_all, year, periodo_tipo)
+            all_targets_year = filter_targets_view(
+                targets_view_all,
+                year,
+                periodo_tipo,
+                month_num=mes,
+                quarter_num=quarter,
+                ytd=effective_ytd,
+            )
             uf_opts = [""] + sorted([v for v in all_targets_year.get("state", pd.Series(dtype=str)).dropna().astype(str).unique().tolist() if v])
-            vend_opts = [""] + sorted([v for v in all_targets_year.get("sales_rep_code", pd.Series(dtype=str)).dropna().astype(str).unique().tolist() if v])
         else:
-            all_metas = list_metas({"ano": year})
+            filtros_metas_base = {"ano": year, "periodo_tipo": periodo_tipo, "mes": mes, "quarter": quarter}
+            if sel_company != "TODOS":
+                filtros_metas_base["empresa"] = sel_company
+            all_metas = list_metas(filtros_metas_base)
+            all_metas = filter_local_targets_scope(all_metas, sel_company, sel_vendor, selected_vendor_candidates)
             if PROFILE == "gestor" and not all_metas.empty:
                 acl = load_acl().get("gestor", {})
                 allow = _clean_list(acl.get("allow_vendedores", []))
@@ -2083,32 +3038,23 @@ if page == "Metas Comerciais":
                 elif block:
                     all_metas = all_metas[~all_metas["vendedor_id"].isin(block)]
             uf_opts = [""] + sorted(all_metas["estado"].dropna().unique().tolist()) if not all_metas.empty else [""]
-            vend_opts = [""] + sorted(all_metas["vendedor_id"].dropna().unique().tolist()) if not all_metas.empty else [""]
 
-        uf = colf2.selectbox("UF (opcional)", options=uf_opts, key="metas_uf")
-        vend = colf3.selectbox("Vendedor ID (opcional)", options=vend_opts, key="metas_vendedor")
-        status = colf4.multiselect("Status", ["ATIVO", "PAUSADO", "DESLIGADO", "TRANSFERIDO"], key="metas_status")
-        if colf5.button("Criar dados demo", key="metas_seed"):
+        uf = colf1.selectbox("UF (opcional)", options=uf_opts, key="metas_uf")
+        status = colf2.multiselect("Status", ["ATIVO", "PAUSADO", "DESLIGADO", "TRANSFERIDO"], key="metas_status")
+        if colf3.button("Criar dados demo", key="metas_seed"):
             seed_demo()
             load_sales_targets_view.clear()
             st.success("Dados demo criados.")
-
-        if periodo_tipo == "MONTH":
-            mes = st.selectbox("Mes", [""] + list(range(1, 13)), key="metas_mes")
-            quarter = None
-        else:
-            quarter = st.selectbox("Quarter", [""] + [1, 2, 3, 4], key="metas_quarter")
-            mes = None
 
         if not targets_view_all.empty:
             filtered_view = filter_targets_view(
                 targets_view_all,
                 year,
                 periodo_tipo,
-                month_num=mes or None,
-                quarter_num=quarter or None,
+                month_num=mes,
+                quarter_num=quarter,
+                ytd=effective_ytd,
                 state=uf or None,
-                sales_rep_code=vend or None,
                 statuses=status or None,
             )
             res = build_targets_summary(filtered_view, periodo_tipo)
@@ -2167,21 +3113,24 @@ if page == "Metas Comerciais":
             filtros = {
                 "ano": year,
                 "periodo_tipo": periodo_tipo,
-                "mes": mes or None,
-                "quarter": quarter or None,
+                "mes": mes,
+                "quarter": quarter,
                 "estado": uf or None,
-                "vendedor_id": vend or None,
                 "status": status or None,
             }
+            if sel_company != "TODOS":
+                filtros["empresa"] = sel_company
             if PROFILE == "gestor":
                 acl = load_acl().get("gestor", {})
                 allow = _clean_list(acl.get("allow_vendedores", []))
                 block = _clean_list(acl.get("block_vendedores", []))
                 if allow:
                     filtros["vendedor_id"] = allow
-                elif block:
-                    filtros["vendedor_id"] = [v for v in vend_opts if v and v not in block]
-            res = summary_targets(filtros)
+                elif block and not all_metas.empty:
+                    filtros["vendedor_id"] = [v for v in all_metas["vendedor_id"].dropna().tolist() if v not in block]
+            dfm = list_metas(filtros)
+            dfm = filter_local_targets_scope(dfm, sel_company, sel_vendor, selected_vendor_candidates)
+            res = build_local_targets_summary(dfm, periodo_tipo)
             k = res["kpis"]
             c1, c2, c3, c4 = st.columns(4)
             c1.metric("Meta", fmt_brl_abbrev(k.get("meta", 0)))
@@ -2217,7 +3166,6 @@ if page == "Metas Comerciais":
                 st.write("Delta por UF")
                 st.bar_chart(uf_df.set_index("estado")[["delta"]])
 
-            dfm = list_metas(filtros)
             if PROFILE == "gestor" and not dfm.empty:
                 acl = load_acl().get("gestor", {})
                 allow = _clean_list(acl.get("allow_vendedores", []))
@@ -2243,16 +3191,16 @@ if page == "Metas Comerciais":
                 st.altair_chart(hm, width="stretch")
 
     with tabs[1]:
-        st.write("Listagem de metas")
+        st.write("Listagem de metas no recorte atual do sidebar.")
         if not targets_view_all.empty:
             df = filter_targets_view(
                 targets_view_all,
                 year,
                 periodo_tipo,
-                month_num=mes or None,
-                quarter_num=quarter or None,
+                month_num=mes,
+                quarter_num=quarter,
+                ytd=effective_ytd,
                 state=uf or None,
-                sales_rep_code=vend or None,
                 statuses=status or None,
             )
             if not df.empty:
@@ -2271,11 +3219,21 @@ if page == "Metas Comerciais":
                         "gap_value": "gap_valor",
                     }
                 )
-                if "status" in df.columns:
-                    df["status"] = df["status"].apply(status_chip)
-            st.dataframe(df, height=420, width="stretch")
+                df = format_targets_listing(df)
+                view_cols = [c for c in ["ano", "mes", "estado", "vendedor_id", "vendedor", "meta_valor", "realizado_valor", "atingimento_pct", "gap_valor", "status"] if c in df.columns]
+                st.dataframe(
+                    df[view_cols],
+                    height=420,
+                    width="stretch",
+                )
+            else:
+                st.info("Sem metas para o recorte selecionado.")
         else:
-            df = list_metas({"ano": year})
+            filtros_lista = {"ano": year, "periodo_tipo": periodo_tipo, "mes": mes, "quarter": quarter, "estado": uf or None, "status": status or None}
+            if sel_company != "TODOS":
+                filtros_lista["empresa"] = sel_company
+            df = list_metas(filtros_lista)
+            df = filter_local_targets_scope(df, sel_company, sel_vendor, selected_vendor_candidates)
             if PROFILE == "gestor" and not df.empty:
                 acl = load_acl().get("gestor", {})
                 allow = _clean_list(acl.get("allow_vendedores", []))
@@ -2284,10 +3242,16 @@ if page == "Metas Comerciais":
                     df = df[df["vendedor_id"].isin(allow)]
                 elif block:
                     df = df[~df["vendedor_id"].isin(block)]
-            if not df.empty and "status" in df.columns:
-                df = df.copy()
-                df["status"] = df["status"].apply(status_chip)
-            st.dataframe(df, height=420)
+            if not df.empty:
+                df = format_targets_listing(df)
+                view_cols = [c for c in ["ano", "mes", "estado", "vendedor_id", "meta_valor", "realizado_valor", "atingimento_pct", "gap_valor", "status"] if c in df.columns]
+                st.dataframe(
+                    df[view_cols],
+                    height=420,
+                    width="stretch",
+                )
+            else:
+                st.info("Sem metas para o recorte selecionado.")
 
     with tabs[2]:
         st.write("Cadastrar nova meta")
@@ -2304,6 +3268,8 @@ if page == "Metas Comerciais":
             mf["quarter"] = st.selectbox("Quarter", [1,2,3,4], key="meta_quarter") if mf["periodo_tipo"] == "QUARTER" else None
 
         if step == "Segmentacao":
+            empresa_default = sel_company if sel_company in {"CZ", "CR"} else "CZ"
+            mf["empresa"] = st.selectbox("Empresa", ["CZ", "CR"], index=0 if empresa_default == "CZ" else 1, key="meta_empresa")
             mf["estado"] = st.text_input("UF (ex: PR, RS)", key="meta_uf")
             mf["vendedor_id"] = st.text_input("Vendedor ID", key="meta_vendedor")
             mf["canal"] = st.text_input("Canal (opcional)", key="meta_canal")
@@ -2335,6 +3301,7 @@ if page == "Metas Comerciais":
                         "quarter": mf.get("quarter"),
                         "estado": mf.get("estado"),
                         "vendedor_id": mf.get("vendedor_id"),
+                        "empresa": mf.get("empresa"),
                         "canal": mf.get("canal"),
                         "cultura": mf.get("cultura"),
                         "meta_valor": mf.get("meta_valor"),

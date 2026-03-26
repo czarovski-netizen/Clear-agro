@@ -856,9 +856,11 @@ def load_bling_sales_detail(year: int = 2026) -> pd.DataFrame:
                     ["contato.nome", "cliente.nome", "contato", "cliente", "nomeContato"],
                 )
                 order_total = _pick_first_value(order, ["total", "valorTotal", "valor", "totalProdutos"])
+                natureza = _pick_first_value(order, ["naturezaOperacao.id", "naturezaOperacao", "natureza_operacao_id"])
                 items = order.get("itens")
                 if not isinstance(items, list):
                     items = []
+                cfop_order = _first_cfop_from_items(items)
 
                 if not items:
                     rows.append(
@@ -869,6 +871,8 @@ def load_bling_sales_detail(year: int = 2026) -> pd.DataFrame:
                             "cliente": customer,
                             "vendedor": seller,
                             "vendedor_id": seller_id,
+                            "natureza": natureza,
+                            "cfop": cfop_order,
                             "produto_id": "",
                             "produto_codigo": "",
                             "produto": "SEM_ITEM_DETALHADO",
@@ -897,6 +901,8 @@ def load_bling_sales_detail(year: int = 2026) -> pd.DataFrame:
                         item,
                         ["produto.tipo", "tipoProduto", "tipo", "categoria"],
                     ) or product.get("tipo")
+                    natureza_item = _pick_first_value(item, ["naturezaOperacao.id", "naturezaOperacao"]) or natureza
+                    cfop_item = _pick_first_value(item, ["cfop"]) or cfop_order
                     quantidade = _pick_first_value(item, ["quantidade", "qtde", "qtd"])
                     valor_unitario = _pick_first_value(
                         item,
@@ -912,6 +918,8 @@ def load_bling_sales_detail(year: int = 2026) -> pd.DataFrame:
                             "cliente": customer,
                             "vendedor": seller,
                             "vendedor_id": seller_id,
+                            "natureza": natureza_item,
+                            "cfop": cfop_item,
                             "produto_id": produto_id,
                             "produto_codigo": produto_codigo,
                             "produto": produto_nome,
@@ -932,17 +940,29 @@ def load_bling_sales_detail(year: int = 2026) -> pd.DataFrame:
     df["valor_total"] = pd.to_numeric(df["valor_total"], errors="coerce")
     calc_total = df["quantidade"].fillna(0) * df["valor_unitario"].fillna(0)
     df["valor_total"] = df["valor_total"].fillna(calc_total)
+    if "cliente" in df.columns:
+        df["cliente"] = df["cliente"].apply(
+            lambda value: value.get("nome", "") if isinstance(value, dict) else value
+        )
+        df["cliente"] = df["cliente"].fillna("").astype(str).str.strip().replace("", "SEM_CLIENTE")
+    if "vendedor_id" in df.columns:
+        df["vendedor_id"] = df["vendedor_id"].fillna("").astype(str).str.strip()
     if "vendedor_id" in df.columns:
         vendedor_id_txt = df["vendedor_id"].fillna("").astype(str).str.strip()
         vendedor_txt = df["vendedor"].fillna("").astype(str).str.strip()
         df["vendedor"] = vendedor_txt.mask(vendedor_txt.eq(""), vendedor_id_txt)
     df["vendedor"] = df["vendedor"].replace("", "SEM_VENDEDOR").fillna("SEM_VENDEDOR").astype(str)
+    if "natureza" in df.columns:
+        df["natureza"] = df["natureza"].fillna("").astype(str).str.strip()
+    if "cfop" in df.columns:
+        df["cfop"] = df["cfop"].fillna("").astype(str).str.strip()
     df["produto"] = df["produto"].fillna("N/D").astype(str)
     df["tipo_produto"] = df["tipo_produto"].fillna("").astype(str)
     df["produto_id"] = df["produto_id"].fillna("").astype(str)
     df["produto_codigo"] = df["produto_codigo"].fillna("").astype(str)
     df["produto_key"] = df["produto"].map(_normalize_text)
     df["month_start"] = df["data"].dt.to_period("M").dt.to_timestamp()
+    df = _append_nature_labels(df)
 
     produtos = load_bling_produtos()
     if not produtos.empty:
@@ -968,6 +988,10 @@ def load_bling_sales_detail(year: int = 2026) -> pd.DataFrame:
             "pedido_id",
             "cliente",
             "vendedor",
+            "vendedor_id",
+            "natureza",
+            "natureza_label",
+            "cfop",
             "produto_id",
             "produto_codigo",
             "produto",

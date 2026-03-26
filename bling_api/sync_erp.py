@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import os
 import time
 import unicodedata
 from datetime import date
@@ -15,6 +16,15 @@ ROOT = Path(__file__).resolve().parent
 OUT_DIR = ROOT
 REPORT_FILE = ROOT / "bling_sync_report.json"
 ACCOUNT_ALIASES = {"cz": "CZ", "cr": "CR"}
+BANK_ACCOUNT_ENDPOINT_CANDIDATES = [
+    "/contas-financeiras",
+    "/contas/financeiras",
+    "/financeiro/contas-financeiras",
+]
+BANK_BALANCE_DETAIL_SUFFIXES = [
+    "",
+    "/saldo",
+]
 
 
 def _company_tag(company: str) -> str:
@@ -40,8 +50,19 @@ def _report_path(company: str) -> Path:
     return ROOT / f"bling_sync_report_{tag}.json"
 
 
+def _env_csv_list(name: str) -> list[str]:
+    raw = str(os.getenv(name) or "").strip()
+    if not raw:
+        return []
+    return [item.strip() for item in raw.split(",") if item.strip()]
+
+
 def _vendor_map_path(company: str) -> Path:
     return _cache_path("vendedores_map.csv", company)
+
+
+def _bank_accounts_cache_path(company: str) -> Path:
+    return _cache_path("contas_financeiras_cache.jsonl", company)
 
 
 def _read_existing_ids(path: Path) -> set[str]:
@@ -68,6 +89,18 @@ def _append_jsonl(path: Path, rows: list[dict[str, Any]]) -> None:
     with path.open("a", encoding="utf-8") as f:
         for r in rows:
             f.write(json.dumps(r, ensure_ascii=False) + "\n")
+
+
+def _extract_first_number(payload: dict[str, Any], keys: list[str]) -> float | None:
+    for key in keys:
+        value = payload.get(key)
+        if value in (None, ""):
+            continue
+        try:
+            return float(value)
+        except Exception:
+            continue
+    return None
 
 
 def _normalize_text(value: Any) -> str:
@@ -198,6 +231,145 @@ def _enrich_nfe_with_detail(client: BlingClient, row: dict[str, Any]) -> dict[st
     return _merge_nested_objects(row, detail)
 
 
+def _enrich_conta_receber_with_detail(client: BlingClient, row: dict[str, Any]) -> dict[str, Any]:
+    rid = row.get("id")
+    if rid is None:
+        return row
+    detail = client.get_detail(f"/contas/receber/{rid}")
+    return _merge_nested_objects(row, detail)
+
+
+def _enrich_conta_pagar_with_detail(client: BlingClient, row: dict[str, Any]) -> dict[str, Any]:
+    rid = row.get("id")
+    if rid is None:
+        return row
+    detail = client.get_detail(f"/contas/pagar/{rid}")
+    return _merge_nested_objects(row, detail)
+
+
+def _needs_conta_detail_backfill(row: dict[str, Any]) -> bool:
+    origem = row.get("origem")
+    origem_data = origem.get("dataEmissao") if isinstance(origem, dict) else None
+    return not any(
+        [
+            row.get("dataEmissao"),
+            row.get("data_emissao"),
+            row.get("emissao"),
+            origem_data,
+        ]
+    )
+
+
+def _row_year_matches(row: dict[str, Any], years: set[int] | None) -> bool:
+    if not years:
+        return True
+    candidates = [
+        row.get("dataEmissao"),
+        row.get("data_emissao"),
+        row.get("emissao"),
+        row.get("competencia"),
+        row.get("vencimento"),
+        row.get("vencimentoOriginal"),
+    ]
+    origem = row.get("origem")
+    if isinstance(origem, dict):
+        candidates.append(origem.get("dataEmissao"))
+    for value in candidates:
+        if not value:
+            continue
+        text = str(value).strip()
+        if len(text) >= 4 and text[:4].isdigit() and int(text[:4]) in years:
+            return True
+    return False
+
+
+def _row_is_open(row: dict[str, Any]) -> bool:
+    situacao = row.get("situacao")
+    situacao_txt = _normalize_text(situacao)
+    if situacao_txt and "CANCEL" in situacao_txt:
+        return False
+
+    saldo = row.get("saldo")
+    try:
+        if saldo not in (None, ""):
+            return float(saldo) > 0
+    except Exception:
+        pass
+
+    try:
+        if situacao is not None and int(situacao) in {3, 4, 6}:
+            return True
+        if situacao is not None and int(situacao) in {1, 2, 5}:
+            return False
+    except Exception:
+        pass
+
+    if situacao_txt:
+        if any(token in situacao_txt for token in ["ABERTO", "EM ABERTO", "PENDENTE", "PARCIAL"]):
+            return True
+        if any(token in situacao_txt for token in ["PAGO", "PAGA", "BAIXADO", "LIQUIDADO", "QUITADO", "RECEBIDO"]):
+            return False
+    return True
+
+
+def _conta_backfill_predicate(open_only: bool, years: set[int] | None) -> Any:
+    def predicate(row: dict[str, Any]) -> bool:
+        if not _needs_conta_detail_backfill(row):
+            return False
+        if open_only and not _row_is_open(row):
+            return False
+        if years and not _row_year_matches(row, years):
+            return False
+        return True
+
+    return predicate
+
+
+def _backfill_cache_details(
+    client: BlingClient,
+    cache: Path,
+    enrich_row: Any,
+    should_refresh: Any,
+    limit: int | None = None,
+    sleep_s: float = 0.05,
+    progress_every: int = 25,
+) -> dict[str, int]:
+    rows = _read_jsonl(cache)
+    if not rows:
+        return {"updated": 0, "errors": 0}
+
+    updated = 0
+    errors = 0
+    rewritten = False
+    for idx, row in enumerate(rows):
+        if not should_refresh(row):
+            continue
+        if limit is not None and updated >= limit:
+            break
+        try:
+            enriched = enrich_row(row)
+            if isinstance(enriched, dict):
+                enriched["empresa"] = row.get("empresa") or _company_tag(client.account)
+                rows[idx] = enriched
+                updated += 1
+                rewritten = True
+        except Exception as exc:
+            errors += 1
+            rows[idx] = dict(row)
+            rows[idx]["enrich_error"] = str(exc)[:180]
+            rewritten = True
+        if progress_every and (updated + errors) % progress_every == 0 and (updated + errors) > 0:
+            print(
+                f"[INFO] backfill {cache.name} {client.account}: "
+                f"processados={updated + errors} updated={updated} errors={errors}"
+            )
+        time.sleep(sleep_s)
+
+    if rewritten:
+        _rewrite_jsonl(cache, rows)
+    return {"updated": updated, "errors": errors}
+
+
 def _build_vendedores_map_rows(rows: list[dict[str, Any]], company: str) -> list[dict[str, str]]:
     by_id: dict[str, dict[str, str]] = {}
     for row in rows:
@@ -257,6 +429,7 @@ def _sync_paginated(
     enrich_row: Any | None = None,
     max_pages: int | None = None,
     sleep_s: float = 0.15,
+    progress_every_pages: int = 1,
 ) -> dict[str, Any]:
     base_params = dict(params or {})
     seen = _read_existing_ids(cache_file)
@@ -299,6 +472,12 @@ def _sync_paginated(
             batch.append(candidate)
         _append_jsonl(cache_file, batch)
         total_new += len(batch)
+        if progress_every_pages and page % progress_every_pages == 0:
+            print(
+                f"[INFO] {endpoint} {company}: pagina={page} "
+                f"lidos={total_fetched} novos={total_new} "
+                f"enrich_ok={enriched_ok} enrich_err={enriched_err}"
+            )
         page += 1
         if max_pages and page > max_pages:
             break
@@ -310,6 +489,79 @@ def _sync_paginated(
         "pages": page - 1,
         "fetched": total_fetched,
         "new_records": total_new,
+        "enriched_ok": enriched_ok,
+        "enriched_err": enriched_err,
+        "elapsed_s": round(time.time() - started, 2),
+    }
+
+
+def _sync_paginated_snapshot(
+    client: BlingClient,
+    endpoint: str,
+    cache_file: Path,
+    company: str,
+    params: dict[str, Any] | None = None,
+    enrich_row: Any | None = None,
+    max_pages: int | None = None,
+    sleep_s: float = 0.15,
+    progress_every_pages: int = 1,
+) -> dict[str, Any]:
+    base_params = dict(params or {})
+    page = 1
+    total_fetched = 0
+    enriched_ok = 0
+    enriched_err = 0
+    started = time.time()
+    snapshot_rows: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
+
+    while True:
+        query = dict(base_params)
+        query["pagina"] = page
+        query["limite"] = 100
+        rows = client.get_data(endpoint, query)
+        if not rows:
+            break
+        total_fetched += len(rows)
+        for r in rows:
+            rid = r.get("id")
+            if rid is None:
+                continue
+            key = str(rid)
+            if key in seen_ids:
+                continue
+            seen_ids.add(key)
+            candidate = r
+            if enrich_row is not None:
+                try:
+                    maybe = enrich_row(r)
+                    if isinstance(maybe, dict):
+                        candidate = maybe
+                    enriched_ok += 1
+                except Exception as exc:
+                    enriched_err += 1
+                    candidate = dict(r)
+                    candidate["enrich_error"] = str(exc)[:180]
+            candidate["empresa"] = _company_tag(company)
+            snapshot_rows.append(candidate)
+        if progress_every_pages and page % progress_every_pages == 0:
+            print(
+                f"[INFO] {endpoint} {company}: pagina={page} "
+                f"lidos={total_fetched} snapshot={len(snapshot_rows)} "
+                f"enrich_ok={enriched_ok} enrich_err={enriched_err}"
+            )
+        page += 1
+        if max_pages and page > max_pages:
+            break
+        time.sleep(sleep_s)
+
+    _rewrite_jsonl(cache_file, snapshot_rows)
+    return {
+        "endpoint": endpoint,
+        "cache_file": str(cache_file),
+        "pages": page - 1,
+        "fetched": total_fetched,
+        "new_records": len(snapshot_rows),
         "enriched_ok": enriched_ok,
         "enriched_err": enriched_err,
         "elapsed_s": round(time.time() - started, 2),
@@ -456,6 +708,7 @@ def sync_produtos_composicao(client: BlingClient, max_pages: int | None) -> dict
     total_products = 0
     detail_errors = 0
     rows: list[dict[str, Any]] = []
+    processed = 0
 
     while True:
         produtos = client.get_data("/produtos", {"pagina": page, "limite": 100})
@@ -491,6 +744,15 @@ def sync_produtos_composicao(client: BlingClient, max_pages: int | None) -> dict
                 row["composicao_itens"] = []
                 row["detail_error"] = str(exc)[:180]
             rows.append(row)
+            processed += 1
+            if processed % 25 == 0:
+                with_composicao_partial = sum(1 for r in rows if r.get("tem_composicao"))
+                print(
+                    f"[INFO] produtos_composicao {client.account}: processados={processed} "
+                    f"composicao={with_composicao_partial} erros={detail_errors}"
+                )
+            if processed % 100 == 0:
+                _rewrite_jsonl(cache, rows)
         page += 1
         if max_pages and page > max_pages:
             break
@@ -510,14 +772,173 @@ def sync_produtos_composicao(client: BlingClient, max_pages: int | None) -> dict
     }
 
 
-def sync_contas_receber(client: BlingClient, max_pages: int | None) -> dict[str, Any]:
+def _bank_account_endpoint_candidates() -> list[str]:
+    custom = _env_csv_list("BLING_BANK_ACCOUNT_ENDPOINTS")
+    return custom or list(BANK_ACCOUNT_ENDPOINT_CANDIDATES)
+
+
+def _fetch_bank_account_detail(client: BlingClient, base_endpoint: str, row: dict[str, Any]) -> dict[str, Any]:
+    rid = row.get("id")
+    if rid is None:
+        return row
+    out = dict(row)
+    detail_errors: list[str] = []
+    for suffix in BANK_BALANCE_DETAIL_SUFFIXES:
+        try:
+            detail = client.get_detail(f"{base_endpoint}/{rid}{suffix}")
+        except Exception as exc:
+            detail_errors.append(str(exc)[:180])
+            continue
+        if isinstance(detail, dict):
+            out = _merge_nested_objects(out, detail)
+            balance = _extract_first_number(
+                detail,
+                [
+                    "saldo",
+                    "saldoAtual",
+                    "saldo_atual",
+                    "saldoDisponivel",
+                    "saldo_disponivel",
+                    "valorSaldo",
+                    "valor_saldo",
+                ],
+            )
+            if balance is not None:
+                out["saldo"] = balance
+    if detail_errors and "saldo" not in out:
+        out["detail_error"] = detail_errors[-1]
+    return out
+
+
+def sync_contas_financeiras(client: BlingClient, max_pages: int | None) -> dict[str, Any]:
+    cache = _bank_accounts_cache_path(client.account)
+    started = time.time()
+    last_error = ""
+    for endpoint in _bank_account_endpoint_candidates():
+        try:
+            result = _sync_paginated(
+                client,
+                endpoint,
+                cache,
+                company=client.account,
+                params={},
+                enrich_row=lambda r, base=endpoint: _fetch_bank_account_detail(client, base, r),
+                max_pages=max_pages,
+                sleep_s=0.35,
+            )
+            return {
+                "endpoint": endpoint,
+                "cache_file": str(cache),
+                "pages": result["pages"],
+                "fetched": result["fetched"],
+                "new_records": result["new_records"],
+                "enriched_ok": result["enriched_ok"],
+                "enriched_err": result["enriched_err"],
+                "elapsed_s": round(time.time() - started, 2),
+            }
+        except Exception as exc:
+            last_error = str(exc)
+            continue
+    raise RuntimeError(
+        "Nenhum endpoint de contas financeiras respondeu. "
+        f"Tentados: {', '.join(_bank_account_endpoint_candidates())}. Ultimo erro: {last_error}"
+    )
+
+
+def sync_contas_receber(
+    client: BlingClient,
+    max_pages: int | None,
+    *,
+    backfill_only: bool = False,
+    backfill_open_only: bool = False,
+    backfill_years: set[int] | None = None,
+    backfill_limit: int | None = None,
+) -> dict[str, Any]:
     cache = _cache_path("contas_receber_cache.jsonl", client.account)
-    return _sync_paginated(client, "/contas/receber", cache, company=client.account, params={}, max_pages=max_pages)
+    if backfill_only:
+        fetched = 0
+        new_records = 0
+    else:
+        result = _sync_paginated_snapshot(
+            client,
+            "/contas/receber",
+            cache,
+            company=client.account,
+            params={},
+            enrich_row=lambda r: _enrich_conta_receber_with_detail(client, r),
+            max_pages=max_pages,
+            sleep_s=0.4,
+        )
+        fetched = result["fetched"]
+        new_records = result["new_records"]
+    backfill = _backfill_cache_details(
+        client,
+        cache,
+        enrich_row=lambda r: _enrich_conta_receber_with_detail(client, r),
+        should_refresh=_conta_backfill_predicate(backfill_open_only, backfill_years),
+        limit=backfill_limit,
+        sleep_s=0.4,
+    )
+    return {
+        "endpoint": "/contas/receber",
+        "cache_file": str(cache),
+        "pages": 0 if backfill_only else result["pages"],
+        "fetched": fetched,
+        "new_records": new_records,
+        "enriched_ok": 0 if backfill_only else result["enriched_ok"],
+        "enriched_err": 0 if backfill_only else result["enriched_err"],
+        "backfill_updated": backfill["updated"],
+        "backfill_errors": backfill["errors"],
+        "elapsed_s": 0 if backfill_only else result["elapsed_s"],
+    }
 
 
-def sync_contas_pagar(client: BlingClient, max_pages: int | None) -> dict[str, Any]:
+def sync_contas_pagar(
+    client: BlingClient,
+    max_pages: int | None,
+    *,
+    backfill_only: bool = False,
+    backfill_open_only: bool = False,
+    backfill_years: set[int] | None = None,
+    backfill_limit: int | None = None,
+) -> dict[str, Any]:
     cache = _cache_path("contas_pagar_cache.jsonl", client.account)
-    return _sync_paginated(client, "/contas/pagar", cache, company=client.account, params={}, max_pages=max_pages)
+    if backfill_only:
+        fetched = 0
+        new_records = 0
+    else:
+        result = _sync_paginated_snapshot(
+            client,
+            "/contas/pagar",
+            cache,
+            company=client.account,
+            params={},
+            enrich_row=lambda r: _enrich_conta_pagar_with_detail(client, r),
+            max_pages=max_pages,
+            sleep_s=0.4,
+        )
+        fetched = result["fetched"]
+        new_records = result["new_records"]
+    backfill = _backfill_cache_details(
+        client,
+        cache,
+        enrich_row=lambda r: _enrich_conta_pagar_with_detail(client, r),
+        should_refresh=_conta_backfill_predicate(backfill_open_only, backfill_years),
+        limit=backfill_limit,
+        sleep_s=0.4,
+    )
+    return {
+        "endpoint": "/contas/pagar",
+        "cache_file": str(cache),
+        "pages": 0 if backfill_only else result["pages"],
+        "fetched": fetched,
+        "new_records": new_records,
+        "enriched_ok": 0 if backfill_only else result["enriched_ok"],
+        "enriched_err": 0 if backfill_only else result["enriched_err"],
+        "backfill_updated": backfill["updated"],
+        "backfill_errors": backfill["errors"],
+        "elapsed_s": 0 if backfill_only else result["elapsed_s"],
+    }
 
 
 def sync_estoque(client: BlingClient, max_pages: int | None) -> dict[str, Any]:
@@ -595,7 +1016,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--modules",
         default="vendas,nfe,contatos,produtos,contas_receber,contas_pagar,estoque",
-        help="Lista separada por virgula: vendas,nfe,contatos,produtos,produtos_composicao,contas_receber,contas_pagar,estoque",
+        help="Lista separada por virgula: vendas,nfe,contatos,produtos,produtos_composicao,contas_receber,contas_pagar,estoque,contas_financeiras",
     )
     p.add_argument("--max-pages", type=int, default=None, help="Limite de paginas por modulo (teste rapido).")
     p.add_argument(
@@ -614,6 +1035,21 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Limite de registros pendentes para backfill (opcional).",
     )
+    p.add_argument(
+        "--contas-backfill-only",
+        action="store_true",
+        help="Nao pagina as listas de contas; apenas enriquece o cache local existente.",
+    )
+    p.add_argument(
+        "--contas-open-only",
+        action="store_true",
+        help="Em contas, faz backfill somente de titulos em aberto.",
+    )
+    p.add_argument(
+        "--contas-years",
+        default="",
+        help="Lista separada por virgula dos anos para o backfill de contas, ex.: 2025,2026",
+    )
     return p.parse_args()
 
 
@@ -621,6 +1057,11 @@ def main() -> int:
     args = parse_args()
     company = _company_tag(args.company)
     selected = {m.strip().lower() for m in args.modules.split(",") if m.strip()}
+    conta_years = {
+        int(part.strip())
+        for part in str(args.contas_years or "").split(",")
+        if part.strip().isdigit()
+    } or None
     client = BlingClient(account=company)
     report: dict[str, Any] = {
         "company": company,
@@ -643,11 +1084,37 @@ def main() -> int:
     if "produtos_composicao" in selected:
         steps.append(("produtos_composicao", lambda: sync_produtos_composicao(client, args.max_pages)))
     if "contas_receber" in selected:
-        steps.append(("contas_receber", lambda: sync_contas_receber(client, args.max_pages)))
+        steps.append(
+            (
+                "contas_receber",
+                lambda: sync_contas_receber(
+                    client,
+                    args.max_pages,
+                    backfill_only=args.contas_backfill_only,
+                    backfill_open_only=args.contas_open_only,
+                    backfill_years=conta_years,
+                    backfill_limit=args.backfill_limit,
+                ),
+            )
+        )
     if "contas_pagar" in selected:
-        steps.append(("contas_pagar", lambda: sync_contas_pagar(client, args.max_pages)))
+        steps.append(
+            (
+                "contas_pagar",
+                lambda: sync_contas_pagar(
+                    client,
+                    args.max_pages,
+                    backfill_only=args.contas_backfill_only,
+                    backfill_open_only=args.contas_open_only,
+                    backfill_years=conta_years,
+                    backfill_limit=args.backfill_limit,
+                ),
+            )
+        )
     if "estoque" in selected:
         steps.append(("estoque", lambda: sync_estoque(client, args.max_pages)))
+    if "contas_financeiras" in selected:
+        steps.append(("contas_financeiras", lambda: sync_contas_financeiras(client, args.max_pages)))
 
     for name, fn in steps:
         try:
