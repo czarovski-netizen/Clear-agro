@@ -2,36 +2,22 @@
   "company": "CZ",
   "year": 2026,
   "modules": [
-    "nfe",
-    "vendas"
+    "contas_financeiras"
   ],
-  "started_at": "2026-03-24 16:15:43",
+  "started_at": "2026-03-26 20:52:54",
   "results": [
     {
-      "module": "vendas",
-      "endpoint": "/pedidos/vendas",
-      "cache_file": "C:\\Users\\admin\\Desktop\\Clear-agro\\bling_api\\vendas_2026_cache.jsonl",
-      "pages": 32,
-      "fetched": 3146,
-      "new_records": 2346,
-      "enriched_ok": 2346,
+      "module": "contas_financeiras",
+      "endpoint": "/caixas",
+      "cache_file": "C:\\Users\\admin\\Desktop\\Clear-agro\\bling_api\\contas_financeiras_cache.jsonl",
+      "pages": 1,
+      "fetched": 130,
+      "new_records": 13,
+      "enriched_ok": 13,
       "enriched_err": 0,
-      "elapsed_s": 1612.26,
-      "vendor_map_file": "C:\\Users\\admin\\Desktop\\Clear-agro\\bling_api\\vendedores_map.csv",
-      "vendor_map_rows": 64
-    },
-    {
-      "module": "nfe",
-      "endpoint": "/nfe",
-      "cache_file": "C:\\Users\\admin\\Desktop\\Clear-agro\\bling_api\\nfe_2026_cache.jsonl",
-      "pages": 2,
-      "fetched": 169,
-      "new_records": 0,
-      "enriched_ok": 0,
-      "enriched_err": 0,
-      "elapsed_s": 4.69
+      "elapsed_s": 59.32
     }
   ],
   "errors": [],
-  "finished_at": "2026-03-24 16:42:40"
+  "finished_at": "2026-03-26 20:53:54"
 }

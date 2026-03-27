@@ -6,7 +6,7 @@ import json
 import os
 import time
 import unicodedata
-from datetime import date
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -17,9 +17,7 @@ OUT_DIR = ROOT
 REPORT_FILE = ROOT / "bling_sync_report.json"
 ACCOUNT_ALIASES = {"cz": "CZ", "cr": "CR"}
 BANK_ACCOUNT_ENDPOINT_CANDIDATES = [
-    "/contas-financeiras",
-    "/contas/financeiras",
-    "/financeiro/contas-financeiras",
+    "/caixas",
 ]
 BANK_BALANCE_DETAIL_SUFFIXES = [
     "",
@@ -805,6 +803,20 @@ def _fetch_bank_account_detail(client: BlingClient, base_endpoint: str, row: dic
             )
             if balance is not None:
                 out["saldo"] = balance
+            bank_info = detail.get("banco")
+            if isinstance(bank_info, dict):
+                if bank_info.get("nome") and not out.get("banco"):
+                    out["banco"] = bank_info.get("nome")
+                if bank_info.get("nome"):
+                    out["banco.nome"] = bank_info.get("nome")
+            for source_key, target_key in [
+                ("descricao", "descricaoConta"),
+                ("nome", "descricaoConta"),
+            ]:
+                if out.get(source_key) and not out.get(target_key):
+                    out[target_key] = out.get(source_key)
+            if out.get("saldo") is not None and not out.get("saldoAtual"):
+                out["saldoAtual"] = out["saldo"]
     if detail_errors and "saldo" not in out:
         out["detail_error"] = detail_errors[-1]
     return out
@@ -814,18 +826,123 @@ def sync_contas_financeiras(client: BlingClient, max_pages: int | None) -> dict[
     cache = _bank_accounts_cache_path(client.account)
     started = time.time()
     last_error = ""
+    date_start = str(os.getenv("BLING_CAIXAS_DATE_START") or "2024-01-01").strip()
+    date_end = date.today().isoformat()
     for endpoint in _bank_account_endpoint_candidates():
         try:
-            result = _sync_paginated(
-                client,
-                endpoint,
-                cache,
-                company=client.account,
-                params={},
-                enrich_row=lambda r, base=endpoint: _fetch_bank_account_detail(client, base, r),
-                max_pages=max_pages,
-                sleep_s=0.35,
-            )
+            page = 1
+            total_fetched = 0
+            movement_rows: list[dict[str, Any]] = []
+            while True:
+                rows = client.get_data(endpoint, {"pagina": page, "limite": 100})
+                if not rows:
+                    break
+                total_fetched += len(rows)
+                movement_rows.extend(rows)
+                print(f"[INFO] {endpoint} {client.account}: pagina={page} lidos={total_fetched}")
+                page += 1
+                if max_pages and page > max_pages:
+                    break
+                time.sleep(0.35)
+
+            accounts: dict[str, dict[str, Any]] = {}
+            for row in movement_rows:
+                conta = row.get("contaFinanceira") or {}
+                if not isinstance(conta, dict):
+                    continue
+                account_id = str(conta.get("id") or "").strip()
+                if not account_id:
+                    continue
+                account_name = str(conta.get("descricao") or conta.get("nome") or "").strip()
+                current = accounts.get(account_id)
+                if current is None:
+                    current = {
+                        "id": account_id,
+                        "contaFinanceira": conta,
+                        "descricaoConta": account_name,
+                        "nome": account_name,
+                        "saldoDerivadoMovimentos": 0.0,
+                        "movimentos": 0,
+                        "empresa": client.account,
+                        "snapshot_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                    }
+                    accounts[account_id] = current
+                try:
+                    current["saldoDerivadoMovimentos"] = round(
+                        float(current["saldoDerivadoMovimentos"]) + float(row.get("valor") or 0.0), 2
+                    )
+                except Exception:
+                    pass
+                current["movimentos"] = int(current["movimentos"]) + 1
+                current["data_ultimo_movimento"] = str(row.get("data") or current.get("data_ultimo_movimento") or "")
+
+            for account_id, current in accounts.items():
+                saldo = 0.0
+                movimentos = 0
+                latest_date = str(current.get("data_ultimo_movimento") or "")
+                start_dt = datetime.fromisoformat(date_start).date()
+                end_dt = datetime.fromisoformat(date_end).date()
+                window_start = start_dt
+                while window_start <= end_dt:
+                    window_end = min(window_start + timedelta(days=365), end_dt)
+                    page = 1
+                    while True:
+                        params = {
+                            "idContaFinanceira": account_id,
+                            "dataInicial": window_start.isoformat(),
+                            "dataFinal": window_end.isoformat(),
+                            "pagina": page,
+                            "limite": 100,
+                        }
+                        rows = client.get_data(endpoint, params)
+                        if not rows:
+                            break
+                        for row in rows:
+                            try:
+                                saldo += float(row.get("valor") or 0.0)
+                            except Exception:
+                                continue
+                            movimentos += 1
+                            row_date = str(row.get("data") or "")
+                            if row_date and row_date >= latest_date:
+                                latest_date = row_date
+                        page += 1
+                        if max_pages and page > max_pages:
+                            break
+                        time.sleep(0.2)
+                    window_start = window_end + timedelta(days=1)
+                current["saldoDerivadoMovimentos"] = round(saldo, 2)
+                current["movimentos"] = movimentos
+                current["data_ultimo_movimento"] = latest_date
+                current["periodo_consulta_inicial"] = date_start
+                current["periodo_consulta_final"] = date_end
+
+            snapshot_rows: list[dict[str, Any]] = []
+            enriched_ok = 0
+            enriched_err = 0
+            for account in accounts.values():
+                candidate = dict(account)
+                try:
+                    maybe = _fetch_bank_account_detail(client, endpoint, candidate)
+                    if isinstance(maybe, dict):
+                        candidate = maybe
+                    enriched_ok += 1
+                except Exception as exc:
+                    enriched_err += 1
+                    candidate["enrich_error"] = str(exc)[:180]
+                snapshot_rows.append(candidate)
+
+            _rewrite_jsonl(cache, snapshot_rows)
+            result = {
+                "endpoint": endpoint,
+                "cache_file": str(cache),
+                "pages": page - 1,
+                "fetched": total_fetched,
+                "new_records": len(snapshot_rows),
+                "enriched_ok": enriched_ok,
+                "enriched_err": enriched_err,
+                "elapsed_s": round(time.time() - started, 2),
+            }
             return {
                 "endpoint": endpoint,
                 "cache_file": str(cache),
@@ -840,7 +957,7 @@ def sync_contas_financeiras(client: BlingClient, max_pages: int | None) -> dict[
             last_error = str(exc)
             continue
     raise RuntimeError(
-        "Nenhum endpoint de contas financeiras respondeu. "
+        "Nenhum endpoint de caixas e bancos respondeu. "
         f"Tentados: {', '.join(_bank_account_endpoint_candidates())}. Ultimo erro: {last_error}"
     )
 

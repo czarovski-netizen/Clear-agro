@@ -548,8 +548,8 @@ def upper_text(value: Any) -> str:
     return str(value or "").strip().upper()
 
 
-def monthly_frame(snapshot: dict[str, Any]) -> pd.DataFrame:
-    frame = as_frame(snapshot.get("monthly"))
+def monthly_frame(snapshot: dict[str, Any], key: str = "monthly") -> pd.DataFrame:
+    frame = as_frame(snapshot.get(key))
     if frame.empty:
         return frame
     frame["mes"] = frame["mes"].astype(str)
@@ -593,6 +593,8 @@ def bank_balance_frame(snapshot: dict[str, Any]) -> pd.DataFrame:
         return frame
     if "balance" in frame.columns:
         frame["balance"] = pd.to_numeric(frame["balance"], errors="coerce").fillna(0.0)
+    if "balance_status" not in frame.columns:
+        frame["balance_status"] = "API"
     if "as_of" in frame.columns:
         frame["as_of_dt"] = pd.to_datetime(frame["as_of"], errors="coerce")
         frame["as_of_label"] = frame["as_of_dt"].dt.strftime("%d/%m/%Y")
@@ -838,7 +840,7 @@ def has_proxy_rows(monthly: pd.DataFrame) -> bool:
     return (
         not monthly.empty
         and "dre_model" in monthly.columns
-        and monthly["dre_model"].astype(str).eq("bling_proxy").any()
+        and monthly["dre_model"].astype(str).isin(["bling_proxy", "bling_erp"]).any()
     )
 
 
@@ -1111,9 +1113,16 @@ def render_executive(
     st.dataframe(risk, use_container_width=True, hide_index=True)
 
 
-def render_dre(snapshot: dict[str, Any], monthly_period: pd.DataFrame, monthly_all: pd.DataFrame, label: str, year: int | None, month: int | None) -> None:
-    summary = period_summary(monthly_period)
-    proxy_period = has_proxy_rows(monthly_period)
+def render_dre(
+    snapshot: dict[str, Any],
+    monthly_legacy_period: pd.DataFrame,
+    monthly_legacy_all: pd.DataFrame,
+    monthly_bling_period: pd.DataFrame,
+    monthly_bling_all: pd.DataFrame,
+    label: str,
+    year: int | None,
+    month: int | None,
+) -> None:
     ap_details = account_detail_frame(
         snapshot,
         "ap_details",
@@ -1123,11 +1132,29 @@ def render_dre(snapshot: dict[str, Any], monthly_period: pd.DataFrame, monthly_a
     ap_period = filter_dated(ap_details, year, month)
 
     st.header("DRE e EBITDA")
+    source_options = []
+    if not monthly_bling_all.empty:
+        source_options.append("ERP Bling")
+    if not monthly_legacy_all.empty:
+        source_options.append("Finance Recon Hub")
+    if not source_options:
+        source_options = ["ERP Bling"]
+    selected_source = st.radio("Fonte do DRE", options=source_options, horizontal=True)
+    if selected_source == "ERP Bling":
+        monthly_period = monthly_bling_period
+        monthly_all = monthly_bling_all
+        source_label = "ERP Bling"
+    else:
+        monthly_period = monthly_legacy_period
+        monthly_all = monthly_legacy_all
+        source_label = "Finance Recon Hub"
+
+    summary = period_summary(monthly_period)
+    proxy_period = has_proxy_rows(monthly_period)
     tab_resumo, tab_analitico, tab_cmv = st.tabs(["Resumo", "Analitico", "Detalhe do CMV"])
 
     with tab_resumo:
         if proxy_period:
-            despesa_ap_pct = (summary["custo_fixo_base"] / summary["receita_liquida"]) if summary["receita_liquida"] else 0.0
             commercial_sales_total = effective_sales_total(year, month)
             cmv_sales_total = (
                 float(pd.to_numeric(monthly_period.get("cmv_sales_cost"), errors="coerce").fillna(0.0).sum())
@@ -1146,15 +1173,18 @@ def render_dre(snapshot: dict[str, Any], monthly_period: pd.DataFrame, monthly_a
                         ("CMV sobre vendas", pct(cmv_sales_pct)),
                     ],
                     [
-                        ("Despesa AP Proxy", brl(summary["custo_fixo_base"])),
-                        ("EBITDA Proxy", brl(summary["ebitda"])),
+                        (f"Despesa AP {source_label}", brl(summary["custo_fixo_base"])),
+                        (f"EBITDA {source_label}", brl(summary["ebitda"])),
                     ],
                 ]
+            )
+            st.caption(
+                "Base ERP Bling: receita por NF-e emitida, CMV por custo dos itens vendidos e despesas por contas a pagar totais sem cancelados."
             )
         else:
             metric_grid(
                 [
-                    ("Faturamento NF-e", brl(summary["receita_liquida"])),
+                    ("Receita Liquida", brl(summary["receita_liquida"])),
                     ("CMV %", pct(summary["cmv_pct"])),
                     ("Custos Variaveis", brl(summary["custos_variaveis_total"])),
                     ("Custo Fixo Base", brl(summary["custo_fixo_base"])),
@@ -1201,10 +1231,10 @@ def render_dre(snapshot: dict[str, Any], monthly_period: pd.DataFrame, monthly_a
                 labels = {
                     "periodo": "periodo",
                     "receita_liquida": "receita_nfe",
-                    "cmv_proxy": "cmv_proxy",
+                    "cmv_proxy": "cmv_erp",
                     "cmv_pct": "cmv_pct",
-                    "despesas_ap_proxy": "despesa_ap_proxy",
-                    "ebitda": "ebitda_proxy",
+                    "despesas_ap_proxy": "despesa_ap_erp",
+                    "ebitda": "ebitda_erp",
                 }
             else:
                 cols = [
@@ -1437,7 +1467,7 @@ def render_dre(snapshot: dict[str, Any], monthly_period: pd.DataFrame, monthly_a
             st.info("NAO HA BASE MENSAL SUFICIENTE PARA MONTAR A DRE ANALITICA EM COLUNAS PARA O ANO SELECIONADO.")
 
     with tab_cmv:
-        proxy_info = snapshot.get("dre_proxy_info") or {}
+        proxy_info = snapshot.get("dre_bling_info") or {}
         if not proxy_period:
             st.info("O detalhamento de CMV fica disponível quando o snapshot traz a visão proxy de DRE.")
         else:
@@ -1462,11 +1492,11 @@ def render_dre(snapshot: dict[str, Any], monthly_period: pd.DataFrame, monthly_a
                     ("Faturamento NF-e", brl(faturamento_nfe)),
                     ("Vendas efetivas", brl(commercial_sales_total)),
                     ("Custo total das vendas efetivas", brl(cmv_sales_total)),
-                    ("CMV Proxy", brl(summary["cmv_proxy"])),
+                    ("CMV ERP", brl(summary["cmv_proxy"])),
                     ("Vendas / CMV", f"{cmv_cover_ratio:.2f}x" if cmv_cover_ratio else "0,00x"),
                     ("CMV % sobre vendas", pct(cmv_pct)),
                     ("CMV itens vendidos %", pct(cmv_sales_rate)),
-                    ("EBITDA Proxy", brl(summary["ebitda"])),
+                    ("EBITDA ERP", brl(summary["ebitda"])),
                 ],
                 columns=2,
             )
@@ -1476,7 +1506,7 @@ def render_dre(snapshot: dict[str, Any], monthly_period: pd.DataFrame, monthly_a
                     {"indicador": "Faturamento NF-e", "valor": brl(faturamento_nfe)},
                     {"indicador": "Vendas efetivas", "valor": brl(commercial_sales_total)},
                     {"indicador": "Custo total das vendas efetivas", "valor": brl(cmv_sales_total)},
-                    {"indicador": "CMV Proxy", "valor": brl(summary["cmv_proxy"])},
+                    {"indicador": "CMV ERP", "valor": brl(summary["cmv_proxy"])},
                     {"indicador": "CMV fallback compras", "valor": brl(cmv_purchase_total)},
                     {"indicador": "Relacao vendas / CMV", "valor": f"{cmv_cover_ratio:.2f}x" if cmv_cover_ratio else "0,00x"},
                     {"indicador": "CMV % sobre vendas", "valor": pct(cmv_pct)},
@@ -1634,12 +1664,13 @@ def render_cash_management(
     else:
         show_banks = work_banks.copy()
         show_banks["balance"] = show_banks["balance"].map(brl)
-        display_cols = [c for c in ["company", "bank_name", "account_name", "balance", "as_of_label"] if c in show_banks.columns]
+        display_cols = [c for c in ["company", "bank_name", "account_name", "balance", "balance_status", "as_of_label"] if c in show_banks.columns]
         rename_map = {
             "company": "empresa",
             "bank_name": "banco",
             "account_name": "conta",
             "balance": "saldo_atual",
+            "balance_status": "status_saldo",
             "as_of_label": "data_saldo",
         }
         st.subheader("Saldos por Banco")
@@ -1698,6 +1729,7 @@ def render_cash_management(
         )
         show_horizon = pd.DataFrame(rows)
         st.dataframe(show_horizon, use_container_width=True, hide_index=True)
+
 
     if not horizon.empty:
         st.subheader("Curva de Caixa Projetada")
@@ -2044,11 +2076,12 @@ def main() -> None:
     snapshot = load_snapshot(snapshot_mtime_ns)
     logo_path = find_logo()
     monthly_all = monthly_frame(snapshot)
+    monthly_bling_all = monthly_frame(snapshot, "monthly_bling")
     bank_balances_all = bank_balance_frame(snapshot)
     ap_details_all = account_detail_frame(snapshot, "ap_details", snapshot.get("cash_projection", {}).get("top_outflows"), "pagar")
     ar_details_all = account_detail_frame(snapshot, "ar_details", snapshot.get("cash_projection", {}).get("top_inflows"), "receber")
     cash_all = cash_days_frame(snapshot)
-    years, month_map = period_options_from_frames([monthly_all, cash_all, ap_details_all, ar_details_all])
+    years, month_map = period_options_from_frames([monthly_all, monthly_bling_all, cash_all, ap_details_all, ar_details_all])
     current_year = datetime.now().year
     selected_year = current_year if current_year in years else (years[-1] if years else None)
     selected_month = None
@@ -2100,6 +2133,7 @@ def main() -> None:
 
     current_label = period_label(selected_year, selected_month)
     monthly_period = filter_monthly(monthly_all, selected_year, selected_month)
+    monthly_bling_period = filter_monthly(monthly_bling_all, selected_year, selected_month)
     cash_period = filter_company(filter_dated(cash_all, selected_year, selected_month), selected_company)
     ap_details_period = filter_company(filter_dated(ap_details_all, selected_year, selected_month), selected_company)
     ar_details_period = filter_company(filter_dated(ar_details_all, selected_year, selected_month), selected_company)
@@ -2126,7 +2160,16 @@ def main() -> None:
     elif page == "Painel Executivo Financeiro":
         render_executive(snapshot, monthly_period, ap_details_period, ar_details_period, cash_period, current_label)
     elif page == "DRE e EBITDA":
-        render_dre(snapshot, monthly_period, monthly_all, current_label, selected_year, selected_month)
+        render_dre(
+            snapshot,
+            monthly_period,
+            monthly_all,
+            monthly_bling_period,
+            monthly_bling_all,
+            current_label,
+            selected_year,
+            selected_month,
+        )
     elif page == "FX de Caixa Proj.":
         render_cash_management(snapshot, bank_balances_all, cash_all, ap_details_all, ar_details_all, selected_company)
     elif page == "Caixa e Projecao":

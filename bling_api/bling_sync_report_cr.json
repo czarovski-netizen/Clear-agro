@@ -2,20 +2,22 @@
   "company": "CR",
   "year": 2026,
   "modules": [
-    "nfe",
-    "vendas"
+    "contas_financeiras"
   ],
-  "started_at": "2026-03-24 16:42:41",
-  "results": [],
-  "errors": [
+  "started_at": "2026-03-26 20:53:54",
+  "results": [
     {
-      "module": "vendas",
-      "error": "refresh_token failed: 400 {\"error\":{\"type\":\"invalid_client\",\"message\":\"invalid_client\",\"description\":\"The client credentials are invalid\"}}"
-    },
-    {
-      "module": "nfe",
-      "error": "refresh_token failed: 400 {\"error\":{\"type\":\"invalid_client\",\"message\":\"invalid_client\",\"description\":\"The client credentials are invalid\"}}"
+      "module": "contas_financeiras",
+      "endpoint": "/caixas",
+      "cache_file": "C:\\Users\\admin\\Desktop\\Clear-agro\\bling_api\\contas_financeiras_cache_cr.jsonl",
+      "pages": 1,
+      "fetched": 10,
+      "new_records": 3,
+      "enriched_ok": 3,
+      "enriched_err": 0,
+      "elapsed_s": 16.4
     }
   ],
-  "finished_at": "2026-03-24 16:42:42"
+  "errors": [],
+  "finished_at": "2026-03-26 20:54:10"
 }
