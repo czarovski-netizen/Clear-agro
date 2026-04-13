@@ -15,6 +15,9 @@ reports:
 finance:
 	$(PYTHON) src/reports/build_finance_pack.py
 
+finance-render:
+	$(PYTHON) scripts/publish_finance_render_snapshot.py --skip-push
+
 finance-all: ingest reports
 
 build:
