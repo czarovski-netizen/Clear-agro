@@ -578,6 +578,32 @@ def load_sales_pipeline_view() -> pd.DataFrame:
 
 
 @st.cache_data(show_spinner=False)
+def load_bling_sales_realized_view() -> pd.DataFrame:
+    df = _fetch_crm_view("vw_bling_sales_realized")
+    if df.empty:
+        return df
+    df = _normalize_columns(df)
+    if "transaction_date" in df.columns and "data" not in df.columns:
+        df = df.rename(columns={"transaction_date": "data"})
+    if "revenue_amount" in df.columns and "receita" not in df.columns:
+        df = df.rename(columns={"revenue_amount": "receita"})
+    if "customer_name" in df.columns and "cliente" not in df.columns:
+        df = df.rename(columns={"customer_name": "cliente"})
+    if "sales_rep_name" in df.columns and "vendedor" not in df.columns:
+        df = df.rename(columns={"sales_rep_name": "vendedor"})
+    if "sales_rep_code" in df.columns and "vendedor_id" not in df.columns:
+        df = df.rename(columns={"sales_rep_code": "vendedor_id"})
+    if "company" in df.columns and "empresa" not in df.columns:
+        df = df.rename(columns={"company": "empresa"})
+    df = _coerce_numeric(df, ["receita"])
+    df = _coerce_datetime(df, ["data", "updated_at"])
+    for column in ["cliente", "vendedor", "vendedor_id", "empresa", "customer_state", "invoice_number", "natureza", "natureza_label", "cfop"]:
+        if column in df.columns:
+            df[column] = df[column].fillna("").astype(str).str.strip()
+    return df
+
+
+@st.cache_data(show_spinner=False)
 def load_sales_realized_view() -> pd.DataFrame:
     df = _fetch_crm_view("vw_sales_realized_summary")
     if df.empty:

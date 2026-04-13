@@ -25,6 +25,7 @@ from src.data import (
     load_bling_nfe_detail,
     load_bling_contas,
     load_bling_estoque,
+    load_bling_sales_realized_view,
     load_sales_targets_view,
     load_sales_pipeline_view,
     load_sales_realized_view,
@@ -1632,6 +1633,7 @@ if st.sidebar.button("Recarregar base"):
         load_sheets,
         load_sales_targets_view,
         load_sales_pipeline_view,
+        load_bling_sales_realized_view,
         load_sales_realized_view,
         load_crm_priority_queue,
         load_bling_realizado,
@@ -1850,7 +1852,9 @@ if page == "Executive Cockpit":
     )
     crm_pipeline_view = filter_pipeline_period(crm_pipeline_view, year, selected_month, effective_ytd, selected_quarter)
     cockpit_sheets = {key: value.copy() if isinstance(value, pd.DataFrame) else value for key, value in sheets.items()}
-    remote_realizado = build_remote_realizado_sheet(load_sales_realized_view())
+    remote_realizado = build_remote_realizado_sheet(load_bling_sales_realized_view())
+    if remote_realizado.empty:
+        remote_realizado = build_remote_realizado_sheet(load_sales_realized_view())
     if not remote_realizado.empty:
         remote_realizado = upper_dashboard_text(apply_acl(remote_realizado, vendor_col="vendedor"))
         remote_realizado = filter_company_scope(remote_realizado, sel_company)

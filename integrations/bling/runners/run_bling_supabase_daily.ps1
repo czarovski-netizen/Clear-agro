@@ -19,6 +19,7 @@ $IngestScript = Join-Path $HOME ".codex\skills\finance-ingest-hub\scripts\financ
 $IngestConfigCZ = Join-Path $ClearRoot "integrations\bling\config\bling_ingest_hub_v1_cz.json"
 $IngestConfigCR = Join-Path $ClearRoot "integrations\bling\config\bling_ingest_hub_v1_cr.json"
 $GeneratorScript = Join-Path $ClearRoot "integrations\bling\load\generate_bling_supabase_import.py"
+$NfeGeneratorScript = Join-Path $ClearRoot "integrations\bling\load\generate_bling_nfe_supabase_import.py"
 $ReconcileScript = Join-Path $ClearRoot "integrations\bling\reconciliation\reconcile_bling_supabase.py"
 $SyncCacheRootsScript = Join-Path $ClearRoot "scripts\sync_bling_cache_roots.py"
 $BlingSecretsPath = Join-Path $ClearRoot "00_governanca\politicas_de_acesso\legacy_credenciais\bling id.txt"
@@ -318,6 +319,14 @@ try {
         }
         Set-Location $ClearRoot
         python $GeneratorScript --bling-dir $BlingDir --status-dir $StatusDir --from-date $FromDate --run-id ("bling_import_v1_{0}" -f $RunId) --batch-size 400 --company $CompanyTag
+    }
+
+    Invoke-Step "Generate Bling NF-e -> Supabase migration" {
+        if (-not (Test-Path $NfeGeneratorScript)) {
+            throw "Script gerador NF-e nao encontrado: $NfeGeneratorScript"
+        }
+        Set-Location $ClearRoot
+        python $NfeGeneratorScript --bling-dir $BlingDir --status-dir $StatusDir --run-id ("bling_nfe_import_v1_{0}" -f $RunId) --batch-size 300 --company $CompanyTag
     }
 
     if (-not $SkipPush) {
