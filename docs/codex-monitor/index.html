@@ -418,61 +418,74 @@
         const response = await fetch("./usage.json", { cache: "no-store" });
         if (!response.ok) throw new Error("Nao foi possivel carregar usage.json");
         const data = await response.json();
-        const plan = data.plan || {};
-        const windowData = data.window5h || {};
-        const projects = data.projects || [];
-        const tasks = data.tasks || [];
-        const daily = data.dailyUsage || {};
-        const months = daily.months || {};
-        const monthKeys = Object.keys(months);
-        const usedPercent = plan.limit ? (plan.used / plan.limit) * 100 : 0;
-        const remaining = Math.max((plan.limit || 0) - (plan.used || 0), 0);
+        const resumo = data.resumo || {};
+        const unit = resumo.unidade || "unidades";
+        const currency = resumo.moeda || "BRL";
+        const limit = Number(resumo.limite_total || 0);
+        const used = Number(resumo.uso_atual || 0);
+        const remaining = Math.max(limit - used, 0);
+        const usedPercent = limit ? (used / limit) * 100 : 0;
         const remainingPercent = 100 - usedPercent;
+        const windowRemaining = Number(resumo.restante_janela_5h || 0);
+        const windowUsed = 100 - windowRemaining;
+        const planPrice = Number(resumo.valor_plano || 0);
+        const costPerUnit = limit ? planPrice / limit : 0;
+        const remainingValue = remaining * costPerUnit;
+        const status = buildStatusLabel(usedPercent);
+        const months = data.uso_diario || {};
+        const monthKeys = Object.keys(months);
 
         setText("hero-consumption", formatPercent(usedPercent));
-        setText("hero-note", `${formatNumber(plan.used)} ${plan.unit} usados de ${formatNumber(plan.limit)} ${plan.unit}.`);
-        setText("hero-status", data.status || buildStatusLabel(usedPercent));
-        setText("hero-status-note", data.statusNote || "Status calculado a partir do consumo atual.");
-        setText("window-used", formatPercent(windowData.usedPercent));
-        setText("window-remaining", formatPercent(windowData.remainingPercent));
-        setText("window-reset", windowData.resetAt || "--:--");
-        setText("plan-limit", `${formatNumber(plan.limit)} ${plan.unit}`);
-        setText("plan-price", formatCurrency(plan.price, plan.currency));
-        setText("plan-used", `${formatNumber(plan.used)} ${plan.unit}`);
-        setText("plan-remaining", `${formatNumber(remaining)} ${plan.unit}`);
-        setText("plan-cost-per-unit", formatCurrency(plan.costPerUnit, plan.currency));
-        setText("plan-renewal", plan.renewalDate || "--/--/----");
-        setText("plan-remaining-value", formatCurrency(plan.remainingValue, plan.currency));
+        setText("hero-note", `${formatNumber(used)} ${unit} usados de ${formatNumber(limit)} ${unit}.`);
+        setText("hero-status", status);
+        setText("hero-status-note", "Status calculado automaticamente a partir do consumo atual.");
+        setText("window-used", formatPercent(windowUsed));
+        setText("window-remaining", formatPercent(windowRemaining));
+        setText("window-reset", resumo.reset_janela_5h || "--:--");
+        setText("plan-limit", `${formatNumber(limit)} ${unit}`);
+        setText("plan-price", formatCurrency(planPrice, currency));
+        setText("plan-used", `${formatNumber(used)} ${unit}`);
+        setText("plan-remaining", `${formatNumber(remaining)} ${unit}`);
+        setText("plan-cost-per-unit", formatCurrency(costPerUnit, currency));
+        setText("plan-renewal", resumo.data_renovacao || "--/--/----");
+        setText("plan-remaining-value", formatCurrency(remainingValue, currency));
         setText("donut-percent", formatPercent(usedPercent));
-        setText("legend-used", `${formatNumber(plan.used)} ${plan.unit}`);
-        setText("legend-remaining", `${formatNumber(remaining)} ${plan.unit}`);
-        setText("window-progress-label", formatPercent(windowData.usedPercent));
-        setText("window-consumed-legend", formatPercent(windowData.usedPercent));
-        setText("window-available-legend", formatPercent(windowData.remainingPercent));
-        setText("window-reset-legend", windowData.resetAt || "--:--");
-        setText("window-note", windowData.note || "Sem observacao para a janela atual.");
+        setText("legend-used", `${formatNumber(used)} ${unit}`);
+        setText("legend-remaining", `${formatNumber(remaining)} ${unit}`);
+        setText("window-progress-label", formatPercent(windowUsed));
+        setText("window-consumed-legend", formatPercent(windowUsed));
+        setText("window-available-legend", formatPercent(windowRemaining));
+        setText("window-reset-legend", resumo.reset_janela_5h || "--:--");
+        setText("window-note", "Janela de 5 horas calculada a partir do restante informado.");
 
         const donutChart = document.getElementById("donut-chart");
         donutChart.style.background = `conic-gradient(var(--bar-fill) 0 ${usedPercent}%, #dbeafe ${usedPercent}% 100%)`;
 
         const windowBar = document.getElementById("window-progress-bar");
-        windowBar.style.width = `${windowData.usedPercent || 0}%`;
+        windowBar.style.width = `${windowUsed || 0}%`;
 
-        const topProject = projects.reduce((best, item) => (item.value > (best.value || 0) ? item : best), {});
-        const topTask = tasks.reduce((best, item) => (item.value > (best.value || 0) ? item : best), {});
-        setText("top-project-name", topProject.name || "--");
-        setText("top-project-note", topProject.name ? `${formatNumber(topProject.value)} ${plan.unit} consumidos neste projeto.` : "Sem dados.");
-        setText("top-task-name", topTask.name || "--");
-        setText("top-task-note", topTask.name ? `${formatNumber(topTask.value)} ${plan.unit} usados nesta tarefa.` : "Sem dados.");
+        setText("top-project-name", "Nao configurado");
+        setText("top-project-note", "A aba de projetos pode ser preenchida depois, se voce quiser detalhar.");
+        setText("top-task-name", "Nao configurado");
+        setText("top-task-note", "A aba de tarefas pode ser preenchida depois, se necessario.");
 
-        renderRows("projects-table-body", projects, plan.used || 0, plan.unit);
-        renderRows("tasks-table-body", tasks, plan.used || 0, plan.unit);
+        renderRows("projects-table-body", [], used || 0, unit);
+        renderRows("tasks-table-body", [], used || 0, unit);
 
-        monthFilter.innerHTML = monthKeys.map((key) => `<option value="${key}">${months[key].label}</option>`).join("");
+        monthFilter.innerHTML = monthKeys.map((key) => `<option value="${key}">${key}</option>`).join("");
         if (monthKeys.length > 0) {
-          renderDailyChart(monthKeys[0], Object.fromEntries(monthKeys.map((key) => [key, months[key].days])), plan.unit);
+          const normalizedMonths = Object.fromEntries(
+            monthKeys.map((key) => [
+              key,
+              months[key].map((value, index) => ({
+                day: String(index + 1).padStart(2, "0"),
+                value
+              }))
+            ])
+          );
+          renderDailyChart(monthKeys[0], normalizedMonths, unit);
           monthFilter.addEventListener("change", (event) => {
-            renderDailyChart(event.target.value, Object.fromEntries(monthKeys.map((key) => [key, months[key].days])), plan.unit);
+            renderDailyChart(event.target.value, normalizedMonths, unit);
           });
         }
       } catch (error) {
