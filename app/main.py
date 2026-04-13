@@ -2807,8 +2807,13 @@ if page == "Pipeline Manager":
             view = sort_by_available(view, [("expected_close_month", True), ("weighted_pipeline_value", False)])
         st.dataframe(view, height=420, width="stretch")
 
+        export_view = view.copy()
+        for column in export_view.columns:
+            if pd.api.types.is_datetime64tz_dtype(export_view[column]):
+                export_view[column] = export_view[column].dt.tz_localize(None)
+
         out = BytesIO()
-        view.to_excel(out, index=False, sheet_name="pipeline")
+        export_view.to_excel(out, index=False, sheet_name="pipeline")
         st.download_button("Exportar Pipeline", data=out.getvalue(), file_name="pipeline_manager.xlsx")
 
         queue_df = upper_dashboard_text(apply_acl_codes(load_crm_priority_queue(), vendor_col="sales_rep_code"))
