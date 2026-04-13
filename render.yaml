@@ -31,3 +31,21 @@ services:
     buildCommand: python -m pip install --upgrade pip && pip install -r requirements.txt
     startCommand: streamlit run app/main.py --server.address 0.0.0.0 --server.port $PORT --server.headless true
     autoDeploy: true
+  - type: web
+    name: finance-clear-agro-review
+    runtime: python
+    plan: free
+    region: oregon
+    healthCheckPath: /_stcore/health
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.11"
+      - key: APP_BUILD
+        value: "render-finance-review-2026-04-13"
+      - key: STREAMLIT_SERVER_HEADLESS
+        value: "true"
+      - key: STREAMLIT_BROWSER_GATHER_USAGE_STATS
+        value: "false"
+    buildCommand: python -m pip install --upgrade pip && pip install -r requirements.txt
+    startCommand: python 02_financeiro/dashboard_online/build_snapshot.py && streamlit run 02_financeiro/dashboard_online/app.py --server.address 0.0.0.0 --server.port $PORT --server.headless true
+    autoDeploy: true
