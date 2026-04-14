@@ -929,15 +929,29 @@ def build_targets_realizado_summary(
 ) -> dict:
     empty_series = pd.DataFrame(columns=["periodo", "realizado_valor"])
     empty_uf = pd.DataFrame(columns=["estado", "realizado_valor"])
+    empty_vendor = pd.DataFrame(columns=["sales_rep_code", "sales_rep_name", "realizado_valor"])
+    empty_heatmap = pd.DataFrame(columns=["estado", "periodo", "realizado"])
     if realized_df.empty or "data" not in realized_df.columns or "receita" not in realized_df.columns:
-        return {"realizado": 0.0, "series": empty_series, "uf": empty_uf}
+        return {
+            "realizado": 0.0,
+            "series": empty_series,
+            "uf": empty_uf,
+            "vendedor": empty_vendor,
+            "heatmap": empty_heatmap,
+        }
 
     out = realized_df.copy()
     out["data"] = pd.to_datetime(out["data"], errors="coerce")
     out["receita"] = pd.to_numeric(out["receita"], errors="coerce").fillna(0)
     out = out[out["data"].notna()].copy()
     if out.empty:
-        return {"realizado": 0.0, "series": empty_series, "uf": empty_uf}
+        return {
+            "realizado": 0.0,
+            "series": empty_series,
+            "uf": empty_uf,
+            "vendedor": empty_vendor,
+            "heatmap": empty_heatmap,
+        }
 
     if selected_company != "TODOS":
         out = filter_company_scope(out, selected_company)
@@ -949,7 +963,13 @@ def build_targets_realizado_summary(
         out = out[state_series.fillna("").astype(str).str.strip().str.upper() == state_value]
     out = filter_period_scope(out, target_year, month_num, ytd, quarter_num)
     if out.empty:
-        return {"realizado": 0.0, "series": empty_series, "uf": empty_uf}
+        return {
+            "realizado": 0.0,
+            "series": empty_series,
+            "uf": empty_uf,
+            "vendedor": empty_vendor,
+            "heatmap": empty_heatmap,
+        }
 
     if str(period_type).upper() == "QUARTER":
         series = (
@@ -974,7 +994,23 @@ def build_targets_realizado_summary(
         .reset_index()
         .rename(columns={"receita": "realizado_valor"})
     )
-    return {"realizado": float(out["receita"].sum()), "series": series, "uf": uf}
+    vendor_cols = [c for c in ["sales_rep_code", "sales_rep_name"] if c in out.columns]
+    vendedor = (
+        out.groupby(vendor_cols, dropna=False)["receita"].sum().reset_index().rename(columns={"receita": "realizado_valor"})
+        if vendor_cols
+        else empty_vendor
+    )
+    heatmap = (
+        out.assign(
+            estado=out.get("customer_state", out.get("estado", pd.Series("", index=out.index))).fillna("").astype(str).str.strip().str.upper(),
+            periodo=((out["data"].dt.month - 1) // 3 + 1) if str(period_type).upper() == "QUARTER" else out["data"].dt.month,
+        )
+        .groupby(["estado", "periodo"], dropna=False)["receita"]
+        .sum()
+        .reset_index()
+        .rename(columns={"receita": "realizado"})
+    )
+    return {"realizado": float(out["receita"].sum()), "series": series, "uf": uf, "vendedor": vendedor, "heatmap": heatmap}
 
 
 def resolve_realizado_sheet(sales_scope: str, use_bling_source: bool) -> tuple[pd.DataFrame, str]:
@@ -1261,7 +1297,11 @@ def filter_local_targets_scope(
     return out
 
 
-def build_local_targets_summary(df: pd.DataFrame, period_type: str) -> dict:
+def build_local_targets_summary(
+    df: pd.DataFrame,
+    period_type: str,
+    realized_summary: dict | None = None,
+) -> dict:
     empty_series = pd.DataFrame(columns=["meta_valor", "realizado_valor"])
     if df.empty:
         return {
@@ -1272,18 +1312,34 @@ def build_local_targets_summary(df: pd.DataFrame, period_type: str) -> dict:
         }
     out = df.copy()
     out["meta_valor"] = pd.to_numeric(out["meta_valor"], errors="coerce").fillna(0)
-    out["realizado_valor"] = pd.to_numeric(out["realizado_valor"], errors="coerce").fillna(0)
     if "quarter" not in out.columns or out["quarter"].isna().all():
         out["quarter"] = out["mes"].apply(lambda m: ((int(m) - 1) // 3 + 1) if pd.notna(m) else None)
     if str(period_type).upper() == "QUARTER":
-        series = out.groupby(["quarter"], dropna=False)[["meta_valor", "realizado_valor"]].sum().reset_index()
+        series = out.groupby(["quarter"], dropna=False)[["meta_valor"]].sum().reset_index()
     else:
-        series = out.groupby(["mes"], dropna=False)[["meta_valor", "realizado_valor"]].sum().reset_index()
-    uf = out.groupby("estado", dropna=False)[["meta_valor", "realizado_valor"]].sum().reset_index()
+        series = out.groupby(["mes"], dropna=False)[["meta_valor"]].sum().reset_index()
+    uf = out.groupby("estado", dropna=False)[["meta_valor"]].sum().reset_index()
     vendedor_cols = ["vendedor_id"] + (["vendedor"] if "vendedor" in out.columns else [])
-    vendedor = out.groupby(vendedor_cols, dropna=False)[["meta_valor", "realizado_valor"]].sum().reset_index()
+    vendedor = out.groupby(vendedor_cols, dropna=False)[["meta_valor"]].sum().reset_index()
     meta_total = float(out["meta_valor"].sum())
-    realizado_total = float(out["realizado_valor"].sum())
+    if realized_summary and not realized_summary.get("series", pd.DataFrame()).empty and not series.empty:
+        actual_series = realized_summary["series"].copy()
+        if "quarter" in series.columns and "periodo" in actual_series.columns:
+            series = series.merge(actual_series, left_on="quarter", right_on="periodo", how="left").drop(columns=["periodo"], errors="ignore")
+        elif "mes" in series.columns and "periodo" in actual_series.columns:
+            series = series.merge(actual_series, left_on="mes", right_on="periodo", how="left").drop(columns=["periodo"], errors="ignore")
+    if realized_summary and not realized_summary.get("uf", pd.DataFrame()).empty and not uf.empty:
+        uf = uf.merge(realized_summary["uf"], on="estado", how="left")
+    if realized_summary and not realized_summary.get("vendedor", pd.DataFrame()).empty and not vendedor.empty:
+        actual_vendor = realized_summary["vendedor"].copy()
+        join_cols = [c for c in vendedor_cols if c in actual_vendor.columns]
+        if join_cols:
+            vendedor = vendedor.merge(actual_vendor, on=join_cols, how="left")
+    realizado_total = (
+        float(realized_summary["realizado"])
+        if realized_summary and "realizado" in realized_summary
+        else 0.0
+    )
     return {
         "kpis": {
             "meta": meta_total,
@@ -1695,7 +1751,11 @@ def warn_crm_backend(view_name: str, label: str) -> None:
         st.warning(f"Falha ao ler {label} no CRM/Supabase: {error}")
 
 
-def build_targets_summary(view_df: pd.DataFrame, period_type: str) -> dict:
+def build_targets_summary(
+    view_df: pd.DataFrame,
+    period_type: str,
+    realized_summary: dict | None = None,
+) -> dict:
     empty_series = pd.DataFrame(columns=["meta_valor", "realizado_valor"])
     if view_df.empty:
         return {
@@ -1707,16 +1767,15 @@ def build_targets_summary(view_df: pd.DataFrame, period_type: str) -> dict:
 
     df = view_df.copy()
     meta_total = float(numeric_column(df, "target_value").sum())
-    realizado_total = float(numeric_column(df, "actual_value").sum())
     period_col = "quarter_num" if str(period_type).upper() == "QUARTER" else "month_num"
 
     series = pd.DataFrame()
-    if period_col in df.columns and {"target_value", "actual_value"}.issubset(df.columns):
+    if period_col in df.columns and "target_value" in df.columns:
         series = (
-            df.groupby(period_col, dropna=False)[["target_value", "actual_value"]]
+            df.groupby(period_col, dropna=False)[["target_value"]]
             .sum()
             .reset_index()
-            .rename(columns={period_col: "periodo", "target_value": "meta_valor", "actual_value": "realizado_valor"})
+            .rename(columns={period_col: "periodo", "target_value": "meta_valor"})
             .sort_values("periodo")
         )
         if str(period_type).upper() == "QUARTER":
@@ -1725,26 +1784,45 @@ def build_targets_summary(view_df: pd.DataFrame, period_type: str) -> dict:
             series = series.rename(columns={"periodo": "mes"})
 
     uf = pd.DataFrame()
-    if "state" in df.columns and {"target_value", "actual_value"}.issubset(df.columns):
+    if "state" in df.columns and "target_value" in df.columns:
         uf = (
-            df.groupby("state", dropna=False)[["target_value", "actual_value"]]
+            df.groupby("state", dropna=False)[["target_value"]]
             .sum()
             .reset_index()
-            .rename(columns={"state": "estado", "target_value": "meta_valor", "actual_value": "realizado_valor"})
+            .rename(columns={"state": "estado", "target_value": "meta_valor"})
             .sort_values("estado")
         )
 
     vendedor = pd.DataFrame()
     vendor_cols = [c for c in ["sales_rep_code", "sales_rep_name"] if c in df.columns]
-    if vendor_cols and {"target_value", "actual_value"}.issubset(df.columns):
+    if vendor_cols and "target_value" in df.columns:
         vendedor = (
-            df.groupby(vendor_cols, dropna=False)[["target_value", "actual_value"]]
+            df.groupby(vendor_cols, dropna=False)[["target_value"]]
             .sum()
             .reset_index()
-            .rename(columns={"target_value": "meta_valor", "actual_value": "realizado_valor"})
+            .rename(columns={"target_value": "meta_valor"})
             .sort_values(vendor_cols)
         )
 
+    if realized_summary and not realized_summary.get("series", pd.DataFrame()).empty and not series.empty:
+        actual_series = realized_summary["series"].copy()
+        if "quarter" in series.columns and "periodo" in actual_series.columns:
+            series = series.merge(actual_series, left_on="quarter", right_on="periodo", how="left").drop(columns=["periodo"], errors="ignore")
+        elif "mes" in series.columns and "periodo" in actual_series.columns:
+            series = series.merge(actual_series, left_on="mes", right_on="periodo", how="left").drop(columns=["periodo"], errors="ignore")
+    if realized_summary and not realized_summary.get("uf", pd.DataFrame()).empty and not uf.empty:
+        uf = uf.merge(realized_summary["uf"], on="estado", how="left")
+    if realized_summary and not realized_summary.get("vendedor", pd.DataFrame()).empty and not vendedor.empty:
+        actual_vendor = realized_summary["vendedor"].copy()
+        join_cols = [c for c in vendor_cols if c in actual_vendor.columns]
+        if join_cols:
+            vendedor = vendedor.merge(actual_vendor, on=join_cols, how="left")
+
+    realizado_total = (
+        float(realized_summary["realizado"])
+        if realized_summary and "realizado" in realized_summary
+        else float(numeric_column(df, "actual_value").sum())
+    )
     atingimento = (realizado_total / meta_total * 100) if meta_total else 0.0
     return {
         "kpis": {
@@ -3702,7 +3780,6 @@ if page == "Metas Comerciais":
                 actual_col="actual_value",
                 gap_col="gap_value",
             )
-            res = build_targets_summary(filtered_view, periodo_tipo)
             realized_summary = build_targets_realizado_summary(
                 metas_realizado_base,
                 target_year=year,
@@ -3715,10 +3792,8 @@ if page == "Metas Comerciais":
                 selected_vendor=sel_vendor,
                 selected_vendor_candidates=selected_vendor_candidates,
             )
+            res = build_targets_summary(filtered_view, periodo_tipo, realized_summary=realized_summary)
             k = res["kpis"]
-            k["realizado"] = realized_summary["realizado"]
-            k["atingimento_pct"] = (k["realizado"] / k.get("meta", 0) * 100) if k.get("meta", 0) else 0.0
-            k["delta"] = k["realizado"] - k.get("meta", 0)
             c1, c2, c3, c4 = st.columns(4)
             c1.metric("Meta", fmt_brl_abbrev(k.get("meta", 0)))
             c2.metric("Realizado", fmt_brl_abbrev(k.get("realizado", 0)))
@@ -3765,15 +3840,8 @@ if page == "Metas Comerciais":
                 st.write("Delta por UF")
                 st.bar_chart(uf_df.set_index("estado")[["delta"]])
 
-            if not filtered_view.empty:
-                heat = filtered_view.copy()
-                heat["periodo"] = heat["quarter_num"] if periodo_tipo == "QUARTER" else heat["month_num"]
-                heat_src = (
-                    heat.groupby(["state", "periodo"], dropna=False)["actual_value"]
-                    .sum()
-                    .reset_index()
-                    .rename(columns={"state": "estado", "actual_value": "realizado"})
-                )
+            if not realized_summary["heatmap"].empty:
+                heat_src = realized_summary["heatmap"].copy()
                 st.write("Heatmap UF x periodo")
                 hm = alt.Chart(heat_src).mark_rect().encode(
                     x=alt.X("periodo:O", title="Periodo"),
@@ -3818,7 +3886,19 @@ if page == "Metas Comerciais":
                 actual_col="realizado_valor",
                 gap_col="gap_valor",
             )
-            res = build_local_targets_summary(dfm, periodo_tipo)
+            realized_summary = build_targets_realizado_summary(
+                metas_realizado_base,
+                target_year=year,
+                period_type=periodo_tipo,
+                month_num=mes,
+                quarter_num=quarter,
+                ytd=effective_ytd,
+                state=uf or None,
+                selected_company=sel_company,
+                selected_vendor=sel_vendor,
+                selected_vendor_candidates=selected_vendor_candidates,
+            )
+            res = build_local_targets_summary(dfm, periodo_tipo, realized_summary=realized_summary)
             k = res["kpis"]
             c1, c2, c3, c4 = st.columns(4)
             c1.metric("Meta", fmt_brl_abbrev(k.get("meta", 0)))
@@ -3862,13 +3942,8 @@ if page == "Metas Comerciais":
                     dfm = dfm[dfm["vendedor_id"].isin(allow)]
                 elif block:
                     dfm = dfm[~dfm["vendedor_id"].isin(block)]
-            if not dfm.empty:
-                if periodo_tipo == "MONTH":
-                    dfm["periodo"] = dfm["mes"]
-                else:
-                    dfm["periodo"] = dfm["quarter"]
-                pivot = dfm.pivot_table(index="estado", columns="periodo", values="realizado_valor", aggfunc="sum", fill_value=0)
-                heat = pivot.reset_index().melt(id_vars=["estado"], var_name="periodo", value_name="realizado")
+            if not realized_summary["heatmap"].empty:
+                heat = realized_summary["heatmap"].copy()
                 st.write("Heatmap UF x periodo")
                 hm = alt.Chart(heat).mark_rect().encode(
                     x=alt.X("periodo:O", title="Periodo"),
