@@ -38,12 +38,13 @@ Defina no ambiente:
 - `GOOGLE_SHEETS_SPREADSHEET_ID`
 - `GOOGLE_SHEETS_TARGETS_SHEET=metas`
 - `GOOGLE_SHEETS_TARGETS_RANGE=A:O`
-- `GOOGLE_SERVICE_ACCOUNT_JSON` ou `GOOGLE_SERVICE_ACCOUNT_JSON_B64`
+- opcionalmente `GOOGLE_SHEETS_PUBLIC_CSV_URL` se a planilha estiver publicada ou acessivel por link publico
+- `GOOGLE_SERVICE_ACCOUNT_JSON` ou `GOOGLE_SERVICE_ACCOUNT_JSON_B64` apenas se quiser acesso privado no Render
 - opcionalmente `GOOGLE_SERVICE_ACCOUNT_FILE` quando rodar localmente com arquivo
 
 ## No Render
-- use `GOOGLE_SERVICE_ACCOUNT_JSON` ou `GOOGLE_SERVICE_ACCOUNT_JSON_B64`
-- compartilhe a planilha com o e-mail da service account
+- opcao mais simples: tornar a planilha acessivel por link e usar `GOOGLE_SHEETS_PUBLIC_CSV_URL`
+- opcao privada: usar `GOOGLE_SERVICE_ACCOUNT_JSON` ou `GOOGLE_SERVICE_ACCOUNT_JSON_B64`
 - depois de salvar as variaveis no Render, faça `Redeploy`
 
 ## Fluxo no dashboard

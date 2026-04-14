@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import base64
+import csv
 import json
 import os
+from io import StringIO
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
+import requests
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google.oauth2 import service_account
@@ -23,6 +27,7 @@ SERVICE_ACCOUNT_FILE = Path(
 )
 SERVICE_ACCOUNT_JSON = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON", "").strip()
 SERVICE_ACCOUNT_JSON_B64 = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON_B64", "").strip()
+PUBLIC_SHEETS_BASE_URL = os.getenv("GOOGLE_SHEETS_PUBLIC_CSV_URL", "").strip()
 
 DEFAULT_SCOPES = [
     "https://www.googleapis.com/auth/gmail.readonly",
@@ -50,6 +55,37 @@ def _load_service_account_info() -> dict[str, Any] | None:
     if not payload:
         return None
     return json.loads(payload)
+
+
+def _build_public_sheet_csv_url(spreadsheet_id: str, range_name: str) -> str:
+    if PUBLIC_SHEETS_BASE_URL:
+        base_url = PUBLIC_SHEETS_BASE_URL.rstrip("?&")
+        if "spreadsheet" in base_url and "?" in base_url:
+            return f"{base_url}&sheet={quote(range_name.split('!')[0])}" if "!" in range_name else base_url
+        return base_url
+    sheet_name = ""
+    csv_range = ""
+    if "!" in range_name:
+        sheet_name, csv_range = range_name.split("!", 1)
+    else:
+        sheet_name = range_name
+    url = f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}/gviz/tq?tqx=out:csv"
+    if sheet_name:
+        url += f"&sheet={quote(sheet_name)}"
+    if csv_range:
+        url += f"&range={quote(csv_range)}"
+    return url
+
+
+def _read_public_sheet_range(spreadsheet_id: str, range_name: str) -> list[list[Any]]:
+    url = _build_public_sheet_csv_url(spreadsheet_id, range_name)
+    response = requests.get(url, timeout=60)
+    response.raise_for_status()
+    text = response.text.strip()
+    if not text:
+        return []
+    reader = csv.reader(StringIO(text))
+    return [row for row in reader]
 
 
 def get_google_sheets_credentials(scopes: list[str] | None = None) -> Credentials:
@@ -126,14 +162,17 @@ def list_drive_files(page_size: int = 10) -> list[dict[str, Any]]:
 
 
 def read_sheet_range(spreadsheet_id: str, range_name: str) -> list[list[Any]]:
-    svc = build_google_sheets_service()
-    data = (
-        svc.spreadsheets()
-        .values()
-        .get(spreadsheetId=spreadsheet_id, range=range_name)
-        .execute()
-    )
-    return data.get("values", [])
+    service_account_info = _load_service_account_info()
+    if service_account_info:
+        svc = build_google_sheets_service()
+        data = (
+            svc.spreadsheets()
+            .values()
+            .get(spreadsheetId=spreadsheet_id, range=range_name)
+            .execute()
+        )
+        return data.get("values", [])
+    return _read_public_sheet_range(spreadsheet_id, range_name)
 
 
 def write_sheet_range(
