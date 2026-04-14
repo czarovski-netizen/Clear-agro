@@ -194,9 +194,10 @@
             <p class="hero-note" id="hero-note">Janela atual de 5 horas.</p>
           </div>
           <div class="hero-side">
-            <p class="hero-kicker">Status</p>
+            <p class="hero-kicker">Tokens Disponiveis do Plano</p>
+            <p class="hero-value" id="available-tokens-hero">0 tokens</p>
             <div class="status" id="hero-status">Carregando</div>
-            <p class="hero-note" id="hero-status-note">Aguardando dados.</p>
+            <p class="hero-note" id="hero-status-note">Saldo comparado com a escala do plano.</p>
           </div>
         </div>
 
@@ -205,6 +206,10 @@
           <div class="stat"><span class="label">Janela atual de 5h</span><span class="value" id="window-used">0%</span></div>
           <div class="stat"><span class="label">Restante na janela</span><span class="value" id="window-remaining">0%</span></div>
           <div class="stat"><span class="label">Reset estimado</span><span class="value" id="window-reset">--:--</span></div>
+          <div class="stat"><span class="label">Tokens disponiveis do plano</span><span class="value" id="window-available-tokens">0 tokens</span></div>
+          <div class="stat"><span class="label">Tokens usados</span><span class="value" id="window-used-tokens">0 tokens</span></div>
+          <div class="stat"><span class="label">Tokens restantes</span><span class="value" id="window-remaining-tokens">0 tokens</span></div>
+          <div class="stat"><span class="label">Escala do painel</span><span class="value" id="window-token-scale">1000 tokens</span></div>
           <div class="stat"><span class="label">Uso semanal</span><span class="value" id="weekly-used">0%</span></div>
           <div class="stat"><span class="label">Restante semanal</span><span class="value" id="weekly-remaining">0%</span></div>
           <div class="stat"><span class="label">Reset semanal</span><span class="value" id="weekly-reset">--:--</span></div>
@@ -383,6 +388,7 @@
         if (!response.ok) throw new Error("Nao foi possivel carregar usage.json");
         const data = await response.json();
         const current = data.current || {};
+        const tokenScale = Number(data.estimated_window_tokens || 1000);
         const usedPercent = Number(current.primary_used_percent || 0);
         const remainingPercent = Number(current.primary_remaining_percent || (100 - usedPercent));
         const weeklyUsed = Number(current.secondary_used_percent || 0);
@@ -390,14 +396,21 @@
         const status = buildStatusLabel(usedPercent);
         const months = data.daily_usage || {};
         const monthKeys = Object.keys(months);
+        const usedTokens = Math.round((usedPercent / 100) * tokenScale);
+        const remainingTokens = Math.max(tokenScale - usedTokens, 0);
 
         setText("hero-consumption", formatPercent(usedPercent));
         setText("hero-note", `Uso da janela principal de ${current.primary_window_minutes || 300} minutos.`);
+        setText("available-tokens-hero", `${formatNumber(remainingTokens)} tokens`);
         setText("hero-status", status);
         setText("hero-status-note", "Status calculado automaticamente a partir do consumo atual.");
         setText("window-used", formatPercent(usedPercent));
         setText("window-remaining", formatPercent(remainingPercent));
         setText("window-reset", current.primary_resets_at || "--:--");
+        setText("window-available-tokens", `${formatNumber(remainingTokens)} tokens`);
+        setText("window-used-tokens", `${formatNumber(usedTokens)} tokens`);
+        setText("window-remaining-tokens", `${formatNumber(remainingTokens)} tokens`);
+        setText("window-token-scale", `${formatNumber(tokenScale)} tokens`);
         setText("weekly-used", formatPercent(weeklyUsed));
         setText("weekly-remaining", formatPercent(weeklyRemaining));
         setText("weekly-reset", current.secondary_resets_at || "--:--");
@@ -406,13 +419,13 @@
         setText("secondary-window-label", `${Math.round((current.secondary_window_minutes || 10080) / 1440)} dias`);
         setText("generated-at", data.generated_at || "--");
         setText("donut-percent", formatPercent(usedPercent));
-        setText("legend-used", formatPercent(usedPercent));
-        setText("legend-remaining", formatPercent(remainingPercent));
+        setText("legend-used", `${formatNumber(usedTokens)} tokens`);
+        setText("legend-remaining", `${formatNumber(remainingTokens)} tokens`);
         setText("window-progress-label", formatPercent(usedPercent));
-        setText("window-consumed-legend", formatPercent(usedPercent));
-        setText("window-available-legend", formatPercent(remainingPercent));
+        setText("window-consumed-legend", `${formatNumber(usedTokens)} tokens`);
+        setText("window-available-legend", `${formatNumber(remainingTokens)} tokens`);
         setText("window-reset-legend", current.primary_resets_at || "--:--");
-        setText("window-note", "Valores lidos automaticamente dos logs locais do Codex.");
+        setText("window-note", "Tokens estimados a partir da escala do painel e dos logs locais do Codex.");
 
         const donutChart = document.getElementById("donut-chart");
         donutChart.style.background = `conic-gradient(var(--bar-fill) 0 ${usedPercent}%, #dbeafe ${usedPercent}% 100%)`;

@@ -132,6 +132,7 @@ def build_payload(samples: list[RateSample]) -> dict[str, Any]:
         return {
             "generated_at": None,
             "plan_type": None,
+            "estimated_window_tokens": 1000,
             "current": {
                 "primary_used_percent": 0,
                 "primary_remaining_percent": 0,
@@ -149,6 +150,7 @@ def build_payload(samples: list[RateSample]) -> dict[str, Any]:
     return {
         "generated_at": latest.timestamp.strftime("%d/%m/%Y %H:%M"),
         "plan_type": latest.plan_type,
+        "estimated_window_tokens": 1000,
         "current": {
             "primary_used_percent": round(latest.primary_used_percent, 1),
             "primary_remaining_percent": round(max(0.0, 100 - latest.primary_used_percent), 1),
