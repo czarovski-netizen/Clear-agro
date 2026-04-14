@@ -1319,7 +1319,24 @@ def render_overview(
     quality = snapshot["quality_reconciliation"]
     governance = snapshot["governance"]
     classic = snapshot["classic_kpis"]
+    
+    # Compute summary from dataframes, with fallback to classic_kpis
     summary = compute_bling_management_summary(ap_period, ar_period, cash_period)
+    
+    # Fallback to classic_kpis when dataframes are empty (e.g., on Render)
+    if summary["ar_total"] == 0 and summary["ap_total"] == 0:
+        classic_kpis = snapshot.get("classic_kpis", {})
+        summary["ar_total"] = classic_kpis.get("ar_aberto", 0)
+        summary["ap_total"] = classic_kpis.get("ap_aberto", 0)
+        summary["ar_vencido"] = classic_kpis.get("ar_vencido", 0)
+        summary["ap_vencido"] = classic_kpis.get("ap_vencido", 0)
+        summary["ar_a_vencer"] = summary["ar_total"] - summary["ar_vencido"]
+        summary["ap_a_vencer"] = summary["ap_total"] - summary["ap_vencido"]
+        summary["saldo_aberto"] = summary["ar_total"] - summary["ap_total"]
+        summary["fluxo_30d"] = classic_kpis.get("fluxo_liquido_previsto_30d", 0)
+        summary["inadimplencia_ar_pct"] = (summary["ar_vencido"] / summary["ar_total"]) if summary["ar_total"] else 0
+        summary["pressao_ap_pct"] = (summary["ap_vencido"] / summary["ap_total"]) if summary["ap_total"] else 0
+    
     dre_summary = period_summary(monthly_period)
     proxy_period = has_proxy_rows(monthly_period)
 
@@ -1414,7 +1431,22 @@ def render_executive(
     label: str,
 ) -> None:
     classic = snapshot["classic_kpis"]
+    
+    # Compute summary from dataframes, with fallback to classic_kpis
     summary = compute_bling_management_summary(ap_period, ar_period, cash_period)
+    
+    # Fallback to classic_kpis when dataframes are empty (e.g., on Render)
+    if summary["ar_total"] == 0 and summary["ap_total"] == 0:
+        classic_kpis = snapshot.get("classic_kpis", {})
+        summary["ar_total"] = classic_kpis.get("ar_aberto", 0)
+        summary["ap_total"] = classic_kpis.get("ap_aberto", 0)
+        summary["ar_vencido"] = classic_kpis.get("ar_vencido", 0)
+        summary["ap_vencido"] = classic_kpis.get("ap_vencido", 0)
+        summary["ar_a_vencer"] = summary["ar_total"] - summary["ar_vencido"]
+        summary["ap_a_vencer"] = summary["ap_total"] - summary["ap_vencido"]
+        summary["saldo_aberto"] = summary["ar_total"] - summary["ap_total"]
+        summary["fluxo_30d"] = classic_kpis.get("fluxo_liquido_previsto_30d", 0)
+    
     dre_summary = period_summary(monthly_period)
     proxy_period = has_proxy_rows(monthly_period)
 
