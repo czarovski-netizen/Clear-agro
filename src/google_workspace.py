@@ -49,12 +49,24 @@ def _ensure_google_dir() -> None:
 def _load_service_account_info() -> dict[str, Any] | None:
     payload = SERVICE_ACCOUNT_JSON
     if not payload and SERVICE_ACCOUNT_JSON_B64:
-        payload = base64.b64decode(SERVICE_ACCOUNT_JSON_B64).decode("utf-8")
+        try:
+            payload = base64.b64decode(SERVICE_ACCOUNT_JSON_B64).decode("utf-8")
+        except Exception:
+            return None
     if not payload and SERVICE_ACCOUNT_FILE.exists():
-        payload = SERVICE_ACCOUNT_FILE.read_text(encoding="utf-8")
+        try:
+            payload = SERVICE_ACCOUNT_FILE.read_text(encoding="utf-8")
+        except Exception:
+            return None
     if not payload:
         return None
-    return json.loads(payload)
+    try:
+        info = json.loads(payload)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(info, dict):
+        return None
+    return info
 
 
 def _build_public_sheet_csv_url(spreadsheet_id: str, range_name: str) -> str:
@@ -164,14 +176,17 @@ def list_drive_files(page_size: int = 10) -> list[dict[str, Any]]:
 def read_sheet_range(spreadsheet_id: str, range_name: str) -> list[list[Any]]:
     service_account_info = _load_service_account_info()
     if service_account_info:
-        svc = build_google_sheets_service()
-        data = (
-            svc.spreadsheets()
-            .values()
-            .get(spreadsheetId=spreadsheet_id, range=range_name)
-            .execute()
-        )
-        return data.get("values", [])
+        try:
+            svc = build_google_sheets_service()
+            data = (
+                svc.spreadsheets()
+                .values()
+                .get(spreadsheetId=spreadsheet_id, range=range_name)
+                .execute()
+            )
+            return data.get("values", [])
+        except Exception:
+            pass
     return _read_public_sheet_range(spreadsheet_id, range_name)
 
 
