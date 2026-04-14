@@ -926,6 +926,82 @@ def resolve_metas_sheet() -> tuple[pd.DataFrame, str]:
     return upper_dashboard_text(remote_metas), "vw_sales_targets_summary"
 
 
+def overlay_targets_actuals_from_realizado(
+    targets_df: pd.DataFrame,
+    realized_df: pd.DataFrame,
+    *,
+    year_col: str,
+    period_type_col: str,
+    month_col: str | None,
+    quarter_col: str | None,
+    state_col: str | None,
+    vendor_col: str | None,
+    company_col: str | None,
+    actual_col: str,
+    gap_col: str | None = None,
+) -> pd.DataFrame:
+    if targets_df.empty or realized_df.empty:
+        return targets_df
+
+    sales = realized_df.copy()
+    if "data" not in sales.columns or "receita" not in sales.columns:
+        return targets_df
+    sales["data"] = pd.to_datetime(sales["data"], errors="coerce")
+    sales["receita"] = pd.to_numeric(sales["receita"], errors="coerce").fillna(0)
+    sales = sales[sales["data"].notna()].copy()
+    if sales.empty:
+        return targets_df
+
+    sales["ano"] = sales["data"].dt.year.astype(int)
+    sales["mes"] = sales["data"].dt.month.astype(int)
+    sales["quarter"] = ((sales["mes"] - 1) // 3 + 1).astype(int)
+    sales["empresa_norm"] = sales.get("empresa", pd.Series("", index=sales.index)).fillna("").astype(str).str.strip().str.upper()
+    sales["vendedor_norm"] = sales.get("vendedor_id", sales.get("vendedor", pd.Series("", index=sales.index))).fillna("").astype(str).str.strip().map(_vendor_key)
+    sales["estado_norm"] = sales.get("customer_state", sales.get("estado", pd.Series("", index=sales.index))).fillna("").astype(str).str.strip().str.upper()
+
+    grouped = (
+        sales.groupby(["ano", "mes", "quarter", "empresa_norm", "vendedor_norm", "estado_norm"], dropna=False)["receita"]
+        .sum()
+        .reset_index()
+    )
+
+    def _row_realizado(row: pd.Series) -> float:
+        try:
+            ano = int(pd.to_numeric(row.get(year_col), errors="coerce"))
+        except Exception:
+            return 0.0
+        period_type = str(row.get(period_type_col, "")).strip().upper()
+        month_value = int(pd.to_numeric(row.get(month_col), errors="coerce")) if month_col and pd.notna(pd.to_numeric(row.get(month_col), errors="coerce")) else None
+        quarter_value = int(pd.to_numeric(row.get(quarter_col), errors="coerce")) if quarter_col and pd.notna(pd.to_numeric(row.get(quarter_col), errors="coerce")) else None
+        state_value = str(row.get(state_col, "") or "").strip().upper() if state_col else ""
+        vendor_value = _vendor_key(row.get(vendor_col, "")) if vendor_col else ""
+        company_value = str(row.get(company_col, "") or "").strip().upper() if company_col else ""
+
+        match = grouped[grouped["ano"] == ano]
+        if period_type == "MONTH" and month_value is not None:
+            match = match[match["mes"] == month_value]
+        elif period_type == "QUARTER" and quarter_value is not None:
+            match = match[match["quarter"] == quarter_value]
+        if company_value:
+            match = match[match["empresa_norm"] == company_value]
+        if vendor_value:
+            match = match[match["vendedor_norm"] == vendor_value]
+        if state_value:
+            match = match[match["estado_norm"] == state_value]
+        if match.empty:
+            return 0.0
+        return float(match["receita"].sum())
+
+    out = targets_df.copy()
+    out[actual_col] = out.apply(_row_realizado, axis=1)
+    if gap_col and gap_col in out.columns:
+        target_candidates = ["target_value", "meta_valor"]
+        target_col = next((column for column in target_candidates if column in out.columns), None)
+        if target_col:
+            out[gap_col] = pd.to_numeric(out[actual_col], errors="coerce").fillna(0) - pd.to_numeric(out[target_col], errors="coerce").fillna(0)
+    return out
+
+
 def filter_sales_nature_scope(df: pd.DataFrame, selected_scope: str) -> pd.DataFrame:
     if df.empty or selected_scope == "Tudo":
         return df
@@ -3363,6 +3439,7 @@ if page == "Metas Comerciais":
     status = []
     mes = selected_month if selected_month is not None and not effective_ytd and selected_quarter is None else None
     quarter = selected_quarter
+    metas_realizado_base = sheets.get("realizado", pd.DataFrame()).copy()
 
     with tabs[0]:
         st.write("Resumo executivo das metas no recorte atual do sidebar.")
@@ -3412,6 +3489,19 @@ if page == "Metas Comerciais":
                 ytd=effective_ytd,
                 state=uf or None,
                 statuses=status or None,
+            )
+            filtered_view = overlay_targets_actuals_from_realizado(
+                filtered_view,
+                metas_realizado_base,
+                year_col="target_year",
+                period_type_col="period_type",
+                month_col="month_num",
+                quarter_col="quarter_num",
+                state_col="state",
+                vendor_col="sales_rep_code",
+                company_col="empresa",
+                actual_col="actual_value",
+                gap_col="gap_value",
             )
             res = build_targets_summary(filtered_view, periodo_tipo)
             k = res["kpis"]
@@ -3486,6 +3576,19 @@ if page == "Metas Comerciais":
                     filtros["vendedor_id"] = [v for v in all_metas["vendedor_id"].dropna().tolist() if v not in block]
             dfm = list_metas(filtros)
             dfm = filter_local_targets_scope(dfm, sel_company, sel_vendor, selected_vendor_candidates)
+            dfm = overlay_targets_actuals_from_realizado(
+                dfm,
+                metas_realizado_base,
+                year_col="ano",
+                period_type_col="periodo_tipo",
+                month_col="mes",
+                quarter_col="quarter",
+                state_col="estado",
+                vendor_col="vendedor_id",
+                company_col="empresa",
+                actual_col="realizado_valor",
+                gap_col="gap_valor",
+            )
             res = build_local_targets_summary(dfm, periodo_tipo)
             k = res["kpis"]
             c1, c2, c3, c4 = st.columns(4)
@@ -3560,6 +3663,19 @@ if page == "Metas Comerciais":
                 statuses=status or None,
             )
             if not df.empty:
+                df = overlay_targets_actuals_from_realizado(
+                    df,
+                    metas_realizado_base,
+                    year_col="target_year",
+                    period_type_col="period_type",
+                    month_col="month_num",
+                    quarter_col="quarter_num",
+                    state_col="state",
+                    vendor_col="sales_rep_code",
+                    company_col="empresa",
+                    actual_col="actual_value",
+                    gap_col="gap_value",
+                )
                 df = df.rename(
                     columns={
                         "target_year": "ano",
@@ -3590,6 +3706,19 @@ if page == "Metas Comerciais":
                 filtros_lista["empresa"] = sel_company
             df = list_metas(filtros_lista)
             df = filter_local_targets_scope(df, sel_company, sel_vendor, selected_vendor_candidates)
+            df = overlay_targets_actuals_from_realizado(
+                df,
+                metas_realizado_base,
+                year_col="ano",
+                period_type_col="periodo_tipo",
+                month_col="mes",
+                quarter_col="quarter",
+                state_col="estado",
+                vendor_col="vendedor_id",
+                company_col="empresa",
+                actual_col="realizado_valor",
+                gap_col="gap_valor",
+            )
             if PROFILE == "gestor" and not df.empty:
                 acl = load_acl().get("gestor", {})
                 allow = _clean_list(acl.get("allow_vendedores", []))
