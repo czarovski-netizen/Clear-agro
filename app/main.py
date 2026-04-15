@@ -48,6 +48,7 @@ from src.metas_db import (
     prepare_sales_targets_import,
 )
 from src.telegram import build_alerts_message, send_telegram_message, telegram_enabled
+from src.vendor_utils import build_vendor_selector_options, normalize_vendor_identity
 
 PROFILE = os.getenv("CRM_PROFILE", "director").strip().lower()
 PUBLIC_REVIEW = os.getenv("CRM_PUBLIC_REVIEW", "").strip().lower() in {"1", "true", "yes", "on"}
@@ -929,7 +930,7 @@ def build_targets_realizado_summary(
 ) -> dict:
     empty_series = pd.DataFrame(columns=["periodo", "realizado_valor"])
     empty_uf = pd.DataFrame(columns=["estado", "realizado_valor"])
-    empty_vendor = pd.DataFrame(columns=["vendedor_id", "vendedor", "realizado_valor"])
+    empty_vendor = pd.DataFrame(columns=["vendedor_label", "vendedor_id", "vendedor", "realizado_valor"])
     empty_heatmap = pd.DataFrame(columns=["estado", "periodo", "realizado"])
     if realized_df.empty or "data" not in realized_df.columns or "receita" not in realized_df.columns:
         return {
@@ -952,6 +953,19 @@ def build_targets_realizado_summary(
             "vendedor": empty_vendor,
             "heatmap": empty_heatmap,
         }
+
+    out = normalize_vendor_identity(
+        out,
+        load_bling_vendor_map(),
+        _build_vendor_alias_map(pd.DataFrame(), load_bling_vendor_map(), load_vendor_links()),
+    )
+    out["vendedor_label"] = out.get("vendedor", pd.Series("", index=out.index)).fillna("").astype(str).str.strip()
+    if "vendedor_id" in out.columns:
+        out["vendedor_label"] = out["vendedor_label"].mask(
+            out["vendedor_label"].eq(""),
+            out["vendedor_id"].fillna("").astype(str).str.strip(),
+        )
+    out["vendedor_label"] = out["vendedor_label"].replace("", "SEM_VENDEDOR")
 
     if selected_company != "TODOS":
         out = filter_company_scope(out, selected_company)
@@ -994,19 +1008,13 @@ def build_targets_realizado_summary(
         .reset_index()
         .rename(columns={"receita": "realizado_valor"})
     )
-    vendor_cols = [c for c in ["sales_rep_code", "sales_rep_name"] if c in out.columns]
-    vendedor = (
-        out.groupby(vendor_cols, dropna=False)["receita"].sum().reset_index().rename(columns={"receita": "realizado_valor"})
-        if vendor_cols
-        else empty_vendor
-    )
-    if not vendedor.empty:
-        vendedor = vendedor.rename(
-            columns={
-                "sales_rep_code": "vendedor_id",
-                "sales_rep_name": "vendedor",
-            }
-        )
+    group_cols = ["vendedor_label"]
+    agg_map: dict[str, str] = {"receita": "sum"}
+    if "vendedor_id" in out.columns:
+        agg_map["vendedor_id"] = "first"
+    if "vendedor" in out.columns:
+        agg_map["vendedor"] = "first"
+    vendedor = out.groupby(group_cols, dropna=False).agg(agg_map).reset_index().rename(columns={"receita": "realizado_valor"})
     heatmap = (
         out.assign(
             estado=out.get("customer_state", out.get("estado", pd.Series("", index=out.index))).fillna("").astype(str).str.strip().str.upper(),
@@ -1329,6 +1337,19 @@ def collapse_targets_rows(df: pd.DataFrame) -> pd.DataFrame:
     if rename_map:
         out = out.rename(columns=rename_map)
 
+    out = normalize_vendor_identity(
+        out,
+        load_bling_vendor_map(),
+        _build_vendor_alias_map(pd.DataFrame(), load_bling_vendor_map(), load_vendor_links()),
+    )
+    out["vendedor_label"] = out.get("vendedor", pd.Series("", index=out.index)).fillna("").astype(str).str.strip()
+    if "vendedor_id" in out.columns:
+        out["vendedor_label"] = out["vendedor_label"].mask(
+            out["vendedor_label"].eq(""),
+            out["vendedor_id"].fillna("").astype(str).str.strip(),
+        )
+    out["vendedor_label"] = out["vendedor_label"].replace("", "SEM_VENDEDOR")
+
     if "empresa" in out.columns:
         out["empresa"] = out["empresa"].fillna("").astype(str).str.strip().str.upper()
     if "estado" in out.columns:
@@ -1347,13 +1368,7 @@ def collapse_targets_rows(df: pd.DataFrame) -> pd.DataFrame:
         out["ano"] = pd.to_numeric(out["ano"], errors="coerce")
 
     key_cols = [c for c in ["ano", "periodo_tipo", "mes", "quarter", "estado", "empresa"] if c in out.columns]
-    if "vendedor_id" in out.columns:
-        out["vendedor_key"] = out["vendedor_id"].where(out["vendedor_id"].astype(str).str.strip() != "", out.get("vendedor", ""))
-    elif "vendedor" in out.columns:
-        out["vendedor_key"] = out["vendedor"]
-    else:
-        out["vendedor_key"] = ""
-    key_cols.append("vendedor_key")
+    key_cols.append("vendedor_label")
 
     if not key_cols:
         return out
@@ -1371,10 +1386,9 @@ def collapse_targets_rows(df: pd.DataFrame) -> pd.DataFrame:
 
     grouped = out.groupby(key_cols, dropna=False).agg(agg).reset_index()
     if "vendedor" not in grouped.columns:
-        grouped["vendedor"] = grouped["vendedor_key"]
+        grouped["vendedor"] = grouped["vendedor_label"]
     else:
-        grouped["vendedor"] = grouped["vendedor"].where(grouped["vendedor"].astype(str).str.strip() != "", grouped["vendedor_key"])
-    grouped = grouped.drop(columns=["vendedor_key"], errors="ignore")
+        grouped["vendedor"] = grouped["vendedor"].where(grouped["vendedor"].astype(str).str.strip() != "", grouped["vendedor_label"])
     return grouped
 
 
@@ -1390,7 +1404,7 @@ def build_local_targets_summary(
             "kpis": {"meta": 0.0, "realizado": 0.0, "atingimento_pct": 0.0, "delta": 0.0},
             "series": empty_series,
             "uf": pd.DataFrame(columns=["estado", "meta_valor", "realizado_valor"]),
-            "vendedor": pd.DataFrame(columns=["vendedor_id", "meta_valor", "realizado_valor"]),
+            "vendedor": pd.DataFrame(columns=["vendedor_label", "vendedor_id", "vendedor", "meta_valor", "realizado_valor"]),
         }
     out = df.copy()
     out["meta_valor"] = pd.to_numeric(out["meta_valor"], errors="coerce").fillna(0)
@@ -1401,8 +1415,13 @@ def build_local_targets_summary(
     else:
         series = out.groupby(["mes"], dropna=False)[["meta_valor"]].sum().reset_index()
     uf = out.groupby("estado", dropna=False)[["meta_valor"]].sum().reset_index()
-    vendedor_cols = ["vendedor_id"] + (["vendedor"] if "vendedor" in out.columns else [])
-    vendedor = out.groupby(vendedor_cols, dropna=False)[["meta_valor"]].sum().reset_index()
+    vendedor = out.groupby("vendedor_label", dropna=False)[["meta_valor"]].sum().reset_index()
+    if "vendedor_id" in out.columns:
+        first_ids = out.groupby("vendedor_label", dropna=False)["vendedor_id"].first().reset_index()
+        vendedor = vendedor.merge(first_ids, on="vendedor_label", how="left")
+    if "vendedor" in out.columns:
+        first_names = out.groupby("vendedor_label", dropna=False)["vendedor"].first().reset_index()
+        vendedor = vendedor.merge(first_names, on="vendedor_label", how="left")
     meta_total = float(out["meta_valor"].sum())
     if realized_summary and not realized_summary.get("series", pd.DataFrame()).empty and not series.empty:
         actual_series = realized_summary["series"].copy()
@@ -1414,9 +1433,12 @@ def build_local_targets_summary(
         uf = uf.merge(realized_summary["uf"], on="estado", how="left")
     if realized_summary and not realized_summary.get("vendedor", pd.DataFrame()).empty and not vendedor.empty:
         actual_vendor = realized_summary["vendedor"].copy()
-        join_cols = [c for c in vendedor_cols if c in actual_vendor.columns]
-        if join_cols:
-            vendedor = vendedor.merge(actual_vendor, on=join_cols, how="left")
+        if "vendedor_label" in actual_vendor.columns:
+            vendedor = vendedor.merge(
+                actual_vendor[[c for c in ["vendedor_label", "realizado_valor"] if c in actual_vendor.columns]],
+                on="vendedor_label",
+                how="left",
+            )
     realizado_total = (
         float(realized_summary["realizado"])
         if realized_summary and "realizado" in realized_summary
@@ -2243,27 +2265,14 @@ for sheet_name, value_col in [("metas", "meta"), ("realizado", "receita")]:
     for vend, val in period_scores.items():
         vendor_scores[vend] = vendor_scores.get(vend, 0.0) + float(val)
 
-active_ranked = sorted(
-    [v for v, score in vendor_scores.items() if score > 0],
-    key=lambda v: (-vendor_scores[v], v),
+vendors = build_vendor_selector_options(
+    vendor_scores,
+    all_vendors_set,
+    vendor_map,
+    vendor_alias_map,
+    show_inactive_vendors=show_inactive_vendors,
 )
-inactive_ranked = sorted([v for v in all_vendors_set if v not in set(active_ranked)])
-
-if show_inactive_vendors:
-    vendors = ["TODOS"] + active_ranked + inactive_ranked
-else:
-    vendors = ["TODOS"] + active_ranked
-    if len(vendors) == 1:
-        vendors = ["TODOS"] + sorted(all_vendors_set)
-
-vendor_name_counts: dict[str, int] = {}
-for option in vendors:
-    vendor_id = _extract_vendor_id_from_label(option)
-    if vendor_id:
-        base_name = option.rsplit("(", 1)[0].strip()
-        if base_name:
-            vendor_name_counts[_vendor_key(base_name)] = vendor_name_counts.get(_vendor_key(base_name), 0) + 1
-display_vendor_map = {option: _vendor_display_label(option, vendor_name_counts) for option in vendors}
+display_vendor_map = {option: option for option in vendors}
 sel_vendor = st.sidebar.selectbox(
     "Vendedor",
     options=vendors,
@@ -2546,7 +2555,7 @@ if page == "Lab Comercial":
         lab_realizado["data"] = pd.to_datetime(lab_realizado["data"], errors="coerce")
         lab_realizado["receita"] = pd.to_numeric(lab_realizado["receita"], errors="coerce").fillna(0)
         lab_realizado = lab_realizado[lab_realizado["data"].notna()].copy()
-        st.caption(f"RECORTE ATUAL: {period} | EMPRESA={sel_company} | MOVIMENTO={sales_scope} | VENDEDOR={display_vendor_map.get(sel_vendor, sel_vendor)}")
+        st.caption(f"RECORTE ATUAL: {period} | EMPRESA={sel_company} | MOVIMENTO={sales_scope} | VENDEDOR={sel_vendor}")
 
         if lab_realizado.empty:
             st.info("Sem dados para os filtros selecionados.")
@@ -2919,7 +2928,7 @@ if page == "Comparativo de Vendas":
             else:
                 compare_years_sorted = sorted(compare_years)
                 recorte_text = (
-                    f"Empresa={sel_company} | Vendedor={display_vendor_map.get(sel_vendor, sel_vendor)} | "
+                    f"Empresa={sel_company} | Vendedor={sel_vendor} | "
                     f"Cliente={selected_customer} | Movimento={sales_scope} | Periodo={comp_period_label or '-'} | "
                     f"Anos={', '.join(str(item) for item in compare_years_sorted)}"
                 )
@@ -3805,7 +3814,7 @@ if page == "Metas Comerciais":
 
     with tabs[0]:
         st.write("Resumo executivo das metas no recorte atual do sidebar.")
-        st.caption(f"Periodo={period} | Vendedor={display_vendor_map.get(sel_vendor, sel_vendor)} | Empresa={sel_company}")
+        st.caption(f"Periodo={period} | Vendedor={sel_vendor} | Empresa={sel_company}")
         colf1, colf2, colf3 = st.columns([2, 2, 1])
 
         if not targets_view_all.empty:
@@ -4082,7 +4091,7 @@ if page == "Metas Comerciais":
                     }
                 )
                 df = format_targets_listing(df)
-                view_cols = [c for c in ["ano", "mes", "estado", "vendedor_id", "vendedor", "meta_valor", "realizado_valor", "atingimento_pct", "gap_valor", "status"] if c in df.columns]
+                view_cols = [c for c in ["ano", "mes", "estado", "vendedor", "meta_valor", "realizado_valor", "atingimento_pct", "gap_valor", "status"] if c in df.columns]
                 st.dataframe(
                     df[view_cols],
                     height=420,
@@ -4120,7 +4129,7 @@ if page == "Metas Comerciais":
                     df = df[~df["vendedor_id"].isin(block)]
             if not df.empty:
                 df = format_targets_listing(df)
-                view_cols = [c for c in ["ano", "mes", "estado", "vendedor_id", "meta_valor", "realizado_valor", "atingimento_pct", "gap_valor", "status"] if c in df.columns]
+                view_cols = [c for c in ["ano", "mes", "estado", "vendedor", "meta_valor", "realizado_valor", "atingimento_pct", "gap_valor", "status"] if c in df.columns]
                 st.dataframe(
                     df[view_cols],
                     height=420,
